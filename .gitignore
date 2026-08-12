@@ -1,0 +1,10 @@
+# Arduino build and editor output
+.pio/
+build/
+*.elf
+*.bin
+
+# Secrets for later backend milestones
+.env
+.env.local
+secrets.h
