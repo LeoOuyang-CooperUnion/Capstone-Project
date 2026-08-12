@@ -3,103 +3,221 @@
   <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>Accessible Hyperlocal Weather Station</title>
+    <title>Hyperlocal Weather Comparison</title>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" integrity="sha256-p4NxAoJBhIINfQ3ynhFwZxGRbVboX7pKf9iL9FtVQYc=" crossorigin="">
     <style>
-      body { font: 18px/1.45 system-ui, sans-serif; max-width: 42rem; margin: 2rem auto; padding: 0 1rem; color: #17212b; }
-      fieldset { border: 1px solid #718096; border-radius: .5rem; margin: 1rem 0; padding: 1rem; }
-      label { display: block; font-weight: 600; margin-top: .75rem; }
-      input, button { box-sizing: border-box; font: inherit; padding: .55rem; }
-      input { width: 100%; border: 1px solid #4a5568; border-radius: .25rem; }
-      button { cursor: pointer; margin-top: 1rem; border: 0; border-radius: .25rem; background: #075985; color: white; }
-      input:focus-visible, button:focus-visible { outline: 3px solid #f59e0b; outline-offset: 3px; }
-      #status { font-weight: 600; }
+      :root { color-scheme: light; font-family: system-ui, sans-serif; color: #17212b; background: #eef4f7; }
+      body { margin: 0; }
+      header, main { width: min(76rem, calc(100% - 2rem)); margin-inline: auto; }
+      header { padding: 1.5rem 0 .5rem; }
+      h1, h2 { line-height: 1.15; }
+      .grid { display: grid; grid-template-columns: minmax(18rem, 25rem) 1fr; gap: 1rem; align-items: start; }
+      .card { background: white; border: 1px solid #c9d5dc; border-radius: .7rem; padding: 1rem; box-shadow: 0 2px 8px #17324d12; }
+      fieldset { border: 1px solid #718096; border-radius: .5rem; padding: .8rem 1rem 1rem; }
+      label { display: block; font-weight: 650; margin-top: .65rem; }
+      input, button, select { box-sizing: border-box; width: 100%; font: inherit; padding: .55rem; }
+      input, select { border: 1px solid #4a5568; border-radius: .3rem; }
+      button { cursor: pointer; margin-top: 1rem; border: 0; border-radius: .3rem; background: #075985; color: white; font-weight: 700; }
+      button:disabled { cursor: wait; opacity: .65; }
+      input:focus-visible, button:focus-visible, select:focus-visible { outline: 3px solid #f59e0b; outline-offset: 2px; }
+      #map { height: 34rem; border-radius: .5rem; background: #d9e3e8; }
+      #status, #comparison-status { font-weight: 650; }
       .note { color: #374151; }
-      [hidden] { display: none; }
+      .legend { display: flex; flex-wrap: wrap; gap: .6rem 1rem; margin: .7rem 0; }
+      .key::before { content: ''; display: inline-block; width: .8rem; height: .8rem; margin-right: .35rem; border-radius: 50%; background: var(--color); }
+      .metric-row { display: grid; grid-template-columns: repeat(3, 1fr); gap: .5rem; }
+      .metric { background: #f5f8fa; padding: .65rem; border-radius: .4rem; }
+      .metric strong { display: block; font-size: 1.15rem; }
+      .leaflet-popup-content { line-height: 1.45; }
+      [hidden] { display: none !important; }
+      @media (max-width: 800px) { .grid { grid-template-columns: 1fr; } #map { height: 27rem; } }
     </style>
   </head>
   <body>
-    <h1>Set Observation Location</h1>
-    <p class="note">Choose the location for this prototype observation. It is recorded as browser-provided or user-selected and is not yet verified as the sensor's physical location.</p>
-    <form id="location-form">
-      <fieldset>
-        <legend>Selected observation location</legend>
-        <button type="button" id="locate">Use my browser location</button>
-        <label>Latitude<input id="latitude" name="latitude" type="number" step="any" min="-90" max="90" required></label>
-        <label>Longitude<input id="longitude" name="longitude" type="number" step="any" min="-180" max="180" required></label>
-      </fieldset>
-      <button type="submit">Validate location</button>
-    </form>
-    <p id="status" aria-live="polite"></p>
-    <section id="waiting" hidden aria-live="polite">
-      <h2>Location validated</h2>
-      <p>The station is ready and waiting for a device observation.</p>
-    </section>
-    <section id="manual-observation" hidden>
-      <h2>Manual Serial Monitor demo</h2>
-      <p class="note">Copy the values shown by the Arduino Serial Monitor. This is a manually entered demonstration, not an automatic device upload. It is saved separately from future device uploads.</p>
-      <form id="manual-observation-form">
-        <fieldset>
-          <legend>Local observation copied from Serial Monitor</legend>
-          <label>Temperature (°C)<input name="temperatureC" type="number" step="any" min="-40" max="85" required></label>
-          <label>Relative humidity (%)<input name="humidityPercent" type="number" step="any" min="0" max="100" required></label>
-          <label>Pressure (hPa)<input name="pressureHpa" type="number" step="any" min="300" max="1100" required></label>
-        </fieldset>
-        <button type="submit">Submit manual demo observation</button>
-      </form>
-      <p id="observation-status" aria-live="polite"></p>
-    </section>
+    <header>
+      <h1>Hyperlocal Weather Comparison</h1>
+      <p class="note">Compare a manually entered BME280 reading with nearby official observations and modeled conditions.</p>
+    </header>
+    <main class="grid">
+      <section class="card">
+        <h2>Enter BME280 reading</h2>
+        <p id="station-description">Loading configured demonstration station…</p>
+        <p class="note">Copy these values from the Arduino Serial Monitor. The backend assigns the timestamp and fixed station location.</p>
+        <form id="observation-form">
+          <fieldset>
+            <legend>Manual Serial Monitor entry</legend>
+            <label>Temperature (°C)<input name="temperatureC" type="number" step="any" min="-40" max="85" required></label>
+            <label>Relative humidity (%)<input name="humidityPercent" type="number" step="any" min="0" max="100" required></label>
+            <label>Surface pressure (hPa)<input name="pressureHpa" type="number" step="any" min="300" max="1100" required></label>
+          </fieldset>
+          <button type="submit">Store and compare reading</button>
+        </form>
+        <p id="status" aria-live="polite"></p>
+        <div id="latest-reading" hidden>
+          <h2>Latest demo reading</h2>
+          <div class="metric-row">
+            <div class="metric"><span>Temperature</span><strong id="local-temperature">—</strong></div>
+            <div class="metric"><span>Humidity</span><strong id="local-humidity">—</strong></div>
+            <div class="metric"><span>Pressure</span><strong id="local-pressure">—</strong></div>
+          </div>
+        </div>
+      </section>
+
+      <section class="card">
+        <h2>Area comparison</h2>
+        <label for="metric">Color markers by</label>
+        <select id="metric">
+          <option value="temperatureC">Temperature</option>
+          <option value="humidityPercent">Relative humidity</option>
+          <option value="pressureHpa">Pressure</option>
+        </select>
+        <div class="legend" aria-label="Map legend">
+          <span class="key" style="--color:#075985">Your BME280</span>
+          <span class="key" style="--color:#15803d">NWS physical station</span>
+          <span class="key" style="--color:#7e22ce">Open-Meteo model</span>
+        </div>
+        <div id="map" role="region" aria-label="Interactive weather comparison map"></div>
+        <p id="comparison-status" aria-live="polite">Loading comparison data…</p>
+        <p class="note">Open-Meteo values are model output, not another physical sensor. NWS readings may be delayed. Indoor sensor values are not directly equivalent to outdoor observations.</p>
+      </section>
+    </main>
+
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
     <script>
-      const form = document.querySelector('#location-form');
+      const form = document.querySelector('#observation-form');
       const status = document.querySelector('#status');
-      const waiting = document.querySelector('#waiting');
-      const manualObservation = document.querySelector('#manual-observation');
-      const manualObservationForm = document.querySelector('#manual-observation-form');
-      const observationStatus = document.querySelector('#observation-status');
-      let locationSource = 'user_selected';
-      document.querySelectorAll('#latitude, #longitude').forEach((input) => {
-        input.addEventListener('input', () => { locationSource = 'user_selected'; });
-      });
-      document.querySelector('#locate').addEventListener('click', () => {
-        if (!navigator.geolocation) { status.textContent = 'Browser location is unavailable. Enter coordinates manually.'; return; }
-        status.textContent = 'Requesting browser location...';
-        navigator.geolocation.getCurrentPosition(({ coords }) => {
-          document.querySelector('#latitude').value = coords.latitude;
-          document.querySelector('#longitude').value = coords.longitude;
-          locationSource = 'browser_geolocation';
-          status.textContent = 'Browser location added. Validate it when ready.';
-        }, () => { locationSource = 'user_selected'; status.textContent = 'Location permission was unavailable. Enter coordinates manually.'; });
-      });
+      const comparisonStatus = document.querySelector('#comparison-status');
+      const metricSelect = document.querySelector('#metric');
+      let station;
+      let localObservation;
+      let comparisonData = { model: null, stations: [] };
+      let map;
+      let markerLayer;
+
+      const metricMetadata = {
+        temperatureC: { label: 'Temperature', unit: '°C' },
+        humidityPercent: { label: 'Humidity', unit: '%' },
+        pressureHpa: { label: 'Pressure', unit: ' hPa' }
+      };
+
+      function formatValue(value, metric) {
+        return Number.isFinite(value) ? `${value.toFixed(1)}${metricMetadata[metric].unit}` : 'Unavailable';
+      }
+
+      function formatTime(value) {
+        if (!value) return 'Unavailable';
+        const parsed = new Date(value);
+        return Number.isNaN(parsed.valueOf()) ? value : parsed.toLocaleString();
+      }
+
+      function markerRadius(value, metric) {
+        if (!Number.isFinite(value)) return 8;
+        if (metric === 'temperatureC') return Math.max(7, Math.min(18, 9 + value / 8));
+        if (metric === 'humidityPercent') return 7 + value / 12;
+        return Math.max(7, Math.min(18, 10 + (value - 1000) / 8));
+      }
+
+      function addWeatherMarker(item, color, metric, label) {
+        if (!Number.isFinite(item.latitude) || !Number.isFinite(item.longitude)) return;
+        const value = item[metric];
+        const marker = L.circleMarker([item.latitude, item.longitude], {
+          radius: markerRadius(value, metric), color, fillColor: color, fillOpacity: .78, weight: 2
+        });
+        marker.bindTooltip(`${item.name}: ${formatValue(value, metric)}`);
+        marker.bindPopup(`
+          <strong>${item.name}</strong><br>
+          ${label}<br>
+          Temperature: ${formatValue(item.temperatureC, 'temperatureC')}<br>
+          Humidity: ${formatValue(item.humidityPercent, 'humidityPercent')}<br>
+          Pressure: ${formatValue(item.pressureHpa, 'pressureHpa')} (${item.pressureType || 'surface pressure'})<br>
+          Time: ${formatTime(item.observedAt)}
+        `);
+        marker.addTo(markerLayer);
+      }
+
+      function drawMarkers() {
+        if (!map || !station) return;
+        markerLayer.clearLayers();
+        const metric = metricSelect.value;
+        if (localObservation) {
+          addWeatherMarker({ ...localObservation, ...station, name: station.name, pressureType: 'surface_pressure' }, '#075985', metric, `Your BME280 (${station.environment})`);
+        } else {
+          L.circleMarker([station.latitude, station.longitude], { radius: 10, color: '#075985', fillColor: '#075985', fillOpacity: .35 })
+            .bindPopup(`<strong>${station.name}</strong><br>Waiting for a BME280 reading.<br>Environment: ${station.environment}`)
+            .addTo(markerLayer);
+        }
+        for (const nearby of comparisonData.stations || []) addWeatherMarker(nearby, '#15803d', metric, 'NWS physical station');
+        if (comparisonData.model) addWeatherMarker(comparisonData.model, '#7e22ce', metric, 'Open-Meteo model output');
+      }
+
+      async function loadComparisons() {
+        comparisonStatus.textContent = 'Loading Open-Meteo and nearby NWS data…';
+        try {
+          const response = await fetch('/api/comparisons/current');
+          const result = await response.json();
+          if (!response.ok) throw new Error(result.error || 'Comparison request failed.');
+          comparisonData = result;
+          drawMarkers();
+          const sourceCount = (result.model ? 1 : 0) + result.stations.length;
+          const warning = result.warnings.length ? ` ${result.warnings.join(' ')}` : '';
+          comparisonStatus.textContent = `${sourceCount} outside comparison point${sourceCount === 1 ? '' : 's'} loaded.${warning}`;
+        } catch {
+          comparisonStatus.textContent = 'Outside comparison data is unavailable. Your local reading can still be entered.';
+        }
+      }
+
+      async function initialize() {
+        try {
+          const response = await fetch('/api/demo-config');
+          const result = await response.json();
+          if (!response.ok) throw new Error();
+          station = result.station;
+          document.querySelector('#station-description').textContent = `${station.name} — ${station.latitude.toFixed(4)}, ${station.longitude.toFixed(4)} — ${station.environment}`;
+          map = L.map('map').setView([station.latitude, station.longitude], 9);
+          L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
+            maxZoom: 19,
+            attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
+          }).addTo(map);
+          markerLayer = L.layerGroup().addTo(map);
+          drawMarkers();
+          await loadComparisons();
+        } catch {
+          document.querySelector('#station-description').textContent = 'Could not load the configured demo station.';
+          comparisonStatus.textContent = 'Map configuration is unavailable.';
+          form.querySelector('button').disabled = true;
+        }
+      }
+
       form.addEventListener('submit', async (event) => {
         event.preventDefault();
+        const submitButton = form.querySelector('button');
         const body = Object.fromEntries(new FormData(form));
-        body.latitude = Number(body.latitude);
-        body.longitude = Number(body.longitude);
-        body.locationSource = locationSource;
-        status.textContent = 'Validating location...';
-        waiting.hidden = true;
+        for (const key of Object.keys(body)) body[key] = Number(body[key]);
+        status.textContent = 'Storing manual demo observation…';
+        submitButton.disabled = true;
         try {
-          const response = await fetch('/api/location-validations', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+          const response = await fetch('/api/demo-observations', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body)
+          });
           const result = await response.json();
           if (!response.ok) { status.textContent = result.error; return; }
-          status.textContent = `Location validated at ${result.validatedAt}.`;
-          waiting.hidden = false;
-          manualObservation.hidden = false;
-        } catch { status.textContent = 'Could not reach the local backend. Confirm npm start is running.'; }
+          localObservation = { ...result.measurement, observedAt: result.receivedAt };
+          document.querySelector('#local-temperature').textContent = formatValue(localObservation.temperatureC, 'temperatureC');
+          document.querySelector('#local-humidity').textContent = formatValue(localObservation.humidityPercent, 'humidityPercent');
+          document.querySelector('#local-pressure').textContent = formatValue(localObservation.pressureHpa, 'pressureHpa');
+          document.querySelector('#latest-reading').hidden = false;
+          status.textContent = `Stored at ${formatTime(result.receivedAt)} as a manual Serial Monitor entry.`;
+          drawMarkers();
+          await loadComparisons();
+        } catch {
+          status.textContent = 'Could not reach the local backend. Confirm npm start is running.';
+        } finally {
+          submitButton.disabled = false;
+        }
       });
-      manualObservationForm.addEventListener('submit', async (event) => {
-        event.preventDefault();
-        const body = Object.fromEntries(new FormData(manualObservationForm));
-        body.temperatureC = Number(body.temperatureC);
-        body.humidityPercent = Number(body.humidityPercent);
-        body.pressureHpa = Number(body.pressureHpa);
-        observationStatus.textContent = 'Validating manual demo observation...';
-        try {
-          const response = await fetch('/api/demo-observations', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
-          const result = await response.json();
-          if (!response.ok) { observationStatus.textContent = result.error; return; }
-          observationStatus.textContent = `Manual demo observation stored at ${result.receivedAt}. It was manually entered, not automatically uploaded by the device.`;
-        } catch { observationStatus.textContent = 'Could not reach the local backend. Confirm npm start is running.'; }
-      });
+
+      metricSelect.addEventListener('change', drawMarkers);
+      initialize();
     </script>
   </body>
 </html>

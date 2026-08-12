@@ -1,72 +1,57 @@
-# Milestone 2 backend
+# Weather comparison backend
 
-This small Express server accepts validated observations and stores them in
-Supabase. Only the backend reads the Supabase secret key.
-
-## Pitch-demo input (no ESP32 Wi-Fi required)
-
-With the backend running, open `http://localhost:3000` on the same computer.
-Choose **Use my browser location** or enter latitude and longitude manually,
-then validate the location. You can then optionally copy the three values from
-Arduino Serial Monitor into the **Manual Serial Monitor demo** form. This is a
-local-only, manually entered demonstration—not an automatic device upload—and
-is not stored as measurement history.
-
-This local prototype requires no user account. It records the location source
-as browser-provided or user-selected, assigns a validation timestamp, and
-logs the location-ready state. It does not claim that the selected location
-has been verified as the sensor's physical location. The manual-demo endpoint
-rejects requests that do not originate on the same computer.
+This Express server stores validated BME280 observations in Supabase and
+serves the local Leaflet comparison demo. Only the backend reads secrets or
+calls external weather providers.
 
 ## Setup
 
 1. Run `npm install` from the project root.
 2. Copy `.env.example` to `.env`.
-3. Set `DEVICE_SECRET`, `SUPABASE_URL`, and `SUPABASE_SECRET_KEY`. Keep this
-   file private.
-4. Run `npm start`.
-5. Open `http://localhost:3000/health`. It should return `{"status":"ok"}`.
+3. Set the device, Supabase, and fixed demo-location variables. Keep `.env`
+   private.
+4. Run `backend/supabase-migration.sql` once in the Supabase SQL editor.
+5. Run `npm start`.
+6. Visit `http://localhost:3000/health`, then `http://localhost:3000`.
 
-## Hosting for the pitch
+Required demo-location variables:
 
-Render is a straightforward option for this Express app. Push the project to
-a private GitHub repository (do not commit `.env` or `secrets.h`), then create
-a Render **Web Service** from that repository with:
-
-- Build command: `npm install`
-- Start command: `npm start`
-- Environment variables: `DEVICE_ID` and `DEVICE_SECRET` with the same values
-  used locally. Do not create `PORT`; Render provides it automatically.
-
-After deployment, Render provides an HTTPS URL. Open that URL to use the
-location-validation page and add `/health` to confirm the service is running.
-The browser location button requires permission from the user. The page still
-works with manually entered coordinates if permission is declined.
-
-## ESP32 configuration
-
-Copy `esp32/bme280_serial_monitor/secrets.h.example` to `secrets.h` in the
-same folder. Set the Wi-Fi details, the matching device ID and secret, and
-your computer's **local IPv4 address** in `BACKEND_URL`.
-
-For example, if the computer's IPv4 address is `192.168.1.50`:
-
-```cpp
-const char BACKEND_URL[] = "http://192.168.1.50:3000";
+```dotenv
+DEMO_LOCATION_NAME=Capstone demonstration station
+DEMO_LATITUDE=40.7128
+DEMO_LONGITUDE=-74.0060
+DEMO_ENVIRONMENT=indoor
+NWS_STATION_LIMIT=5
 ```
 
-The ESP32 and computer must use the same local network. Windows Firewall may
-need to allow Node.js on private networks. Plain HTTP is acceptable only for
-this local development test; deploy over HTTPS before using the device beyond
-your trusted local network.
+## Demo behavior
 
-## Endpoint
+Copy temperature, humidity, and pressure from the Arduino Serial Monitor into
+the form. The backend adds its timestamp and the configured physical station
+location. Browser geolocation is not requested. The manual endpoint is
+restricted to requests from the computer running the backend.
 
-`POST /api/devices/weather-station-001/readings`
+The Leaflet map shows three explicitly labelled sources:
 
-Required header: `X-Device-Secret: <your secret>`
+- the manually entered BME280 observation;
+- nearby physical National Weather Service observations; and
+- Open-Meteo modeled conditions for the configured coordinates.
 
-Example body:
+Map tiles and outside comparisons require internet access. A provider failure
+does not prevent a manual observation from being submitted. Open-Meteo surface
+pressure is compared with BME280 surface pressure; unavailable NWS values are
+shown as unavailable rather than invented.
+
+## Endpoints
+
+- `GET /health`
+- `GET /api/demo-config`
+- `GET /api/comparisons/current`
+- `POST /api/demo-observations`
+- `GET /api/measurements/recent`
+- `POST /api/devices/:id/readings`
+
+Manual observation body:
 
 ```json
 {
@@ -76,9 +61,12 @@ Example body:
 }
 ```
 
-The server assigns `receivedAt`; the ESP32 does not provide a timestamp.
+The automatic ESP32 endpoint additionally requires the matching
+`X-Device-Secret` header. Automatic upload remains available for a later
+connected milestone but is disabled in the current firmware configuration.
 
-## Recent history endpoint
+## Hosting
 
-`GET /api/measurements/recent` returns up to 50 stored observations, newest
-first. It supports the future history dashboard.
+For a hosted version, configure all variables from `.env.example` on the host.
+The app honors the platform-provided `PORT`. Deploy over HTTPS and do not
+expose `.env`, `secrets.h`, or the Supabase secret key.

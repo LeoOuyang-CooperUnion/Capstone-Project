@@ -5,6 +5,6 @@ build/
 *.bin
 
 # Secrets for later backend milestones
-.env
-.env.local
+.env*
+!.env.example
 secrets.h

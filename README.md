@@ -1,39 +1,39 @@
 # Accessible Hyperlocal Weather Station
 
 An affordable, community-oriented weather observation project built around an
-ESP32-S3 and BME280 environmental sensor. It reports **local observations**;
-external forecast information will be added separately in a later milestone.
+ESP32-S3 and BME280 environmental sensor.
 
-## Current milestone
+## Current demo
 
-**Milestone 2 — ESP32 to backend.** The BME280 sketch in
-[`esp32/bme280_serial_monitor`](esp32/bme280_serial_monitor) sends one
-authenticated local observation per minute to the JavaScript backend. The
-backend assigns its receipt timestamp and logs accepted readings. Setup is in
-[`backend/README.md`](backend/README.md).
+The ESP32 prints temperature, relative humidity, and surface pressure to its
+Serial Monitor. The presenter copies those values into the local web app at
+`http://localhost:3000`; ESP32 Wi-Fi is not required.
 
-Supabase is used in Milestone 3 to store validated observations. Manual
-Serial Monitor entries are marked separately from future automatic device
-uploads.
+The backend timestamps and stores each manual observation in Supabase at the
+fixed station location configured in `.env`. A Leaflet map compares it with:
 
-For a local pitch demo where ESP32 Wi-Fi is unavailable, visit
-`http://localhost:3000` while the backend is running. The page accepts the
-browser-provided or manually selected location, then can validate values
-manually copied from the Arduino Serial Monitor. Those values are clearly
-labelled as a local demo entry, not an automatic device upload or stored
-history. The selected location is not treated as a verified sensor location.
+- nearby physical National Weather Service observations; and
+- Open-Meteo modeled conditions at the demonstration location.
+
+These sources are labelled separately. Open-Meteo values are model output,
+not another physical sensor. Manual entries are also distinguished from future
+automatic device uploads.
+
+Setup is documented in [`backend/README.md`](backend/README.md). Firmware and
+wiring instructions are in [`esp32/README.md`](esp32/README.md).
 
 ## Decisions confirmed for the first deployment
 
 - Start with one device and no user accounts.
-- Test first in the United States, while retaining a globally useful design.
-- The backend, not the ESP32, will timestamp accepted uploads.
-- Indoor readings are useful for learning and connectivity tests; outdoor
-  environmental observations need a weather-safe enclosure and radiation
-  shield before they should be treated as local outdoor conditions.
+- Test first in the United States.
+- Use a fixed, presenter-configured physical location rather than browser
+  geolocation.
+- Let the backend timestamp accepted uploads.
+- Keep indoor readings clearly labelled; outdoor environmental observations
+  require a weather-safe enclosure and radiation shield.
 
 ## Scientific note
 
-The BME280 measures temperature, relative humidity, and pressure. It cannot
-forecast weather by itself. Future screens will label sensor observations,
-weather-service forecasts, and any interpretation separately.
+The BME280 measures temperature, relative humidity, and surface pressure. It
+cannot forecast weather by itself. The interface labels sensor observations,
+official station observations, model conditions, and their timestamps.
