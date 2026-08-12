@@ -1,16 +1,47 @@
 # Milestone 2 backend
 
-This small Express server accepts an authenticated BME280 observation and logs
-it. It does **not** store measurements yet; Supabase storage starts in
-Milestone 3.
+This small Express server accepts validated observations and stores them in
+Supabase. Only the backend reads the Supabase secret key.
+
+## Pitch-demo input (no ESP32 Wi-Fi required)
+
+With the backend running, open `http://localhost:3000` on the same computer.
+Choose **Use my browser location** or enter latitude and longitude manually,
+then validate the location. You can then optionally copy the three values from
+Arduino Serial Monitor into the **Manual Serial Monitor demo** form. This is a
+local-only, manually entered demonstration—not an automatic device upload—and
+is not stored as measurement history.
+
+This local prototype requires no user account. It records the location source
+as browser-provided or user-selected, assigns a validation timestamp, and
+logs the location-ready state. It does not claim that the selected location
+has been verified as the sensor's physical location. The manual-demo endpoint
+rejects requests that do not originate on the same computer.
 
 ## Setup
 
 1. Run `npm install` from the project root.
 2. Copy `.env.example` to `.env`.
-3. Set `DEVICE_SECRET` to a long random value. Keep this file private.
+3. Set `DEVICE_SECRET`, `SUPABASE_URL`, and `SUPABASE_SECRET_KEY`. Keep this
+   file private.
 4. Run `npm start`.
 5. Open `http://localhost:3000/health`. It should return `{"status":"ok"}`.
+
+## Hosting for the pitch
+
+Render is a straightforward option for this Express app. Push the project to
+a private GitHub repository (do not commit `.env` or `secrets.h`), then create
+a Render **Web Service** from that repository with:
+
+- Build command: `npm install`
+- Start command: `npm start`
+- Environment variables: `DEVICE_ID` and `DEVICE_SECRET` with the same values
+  used locally. Do not create `PORT`; Render provides it automatically.
+
+After deployment, Render provides an HTTPS URL. Open that URL to use the
+location-validation page and add `/health` to confirm the service is running.
+The browser location button requires permission from the user. The page still
+works with manually entered coordinates if permission is declined.
 
 ## ESP32 configuration
 
@@ -46,3 +77,8 @@ Example body:
 ```
 
 The server assigns `receivedAt`; the ESP32 does not provide a timestamp.
+
+## Recent history endpoint
+
+`GET /api/measurements/recent` returns up to 50 stored observations, newest
+first. It supports the future history dashboard.

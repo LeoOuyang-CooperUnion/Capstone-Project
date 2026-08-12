@@ -4,6 +4,9 @@
 #include <WiFi.h>
 #include "secrets.h"
 
+// Keep this false while manually copying readings into the local demo page.
+// Change it to true only when testing ESP32 Wi-Fi uploads again.
+constexpr bool ENABLE_WIFI_UPLOAD = false;
 constexpr unsigned long READING_INTERVAL_MS = 60000;
 constexpr unsigned long WIFI_RETRY_INTERVAL_MS = 30000;
 constexpr uint8_t BME280_I2C_ADDRESS = 0x76;
@@ -12,6 +15,13 @@ Adafruit_BME280 bme;
 bool sensorAvailable = false;
 unsigned long lastReadingAt = 0;
 unsigned long lastWifiAttemptAt = 0;
+
+void reportWifiEvent(WiFiEvent_t event, WiFiEventInfo_t eventInfo) {
+  if (event == ARDUINO_EVENT_WIFI_STA_DISCONNECTED) {
+    Serial.printf("Wi-Fi disconnected (reason code %d).\n",
+                  eventInfo.wifi_sta_disconnected.reason);
+  }
+}
 
 void printWifiScanResults() {
   Serial.println("Scanning for nearby Wi-Fi networks...");
@@ -62,6 +72,11 @@ bool readAndSendObservation() {
   Serial.printf("Humidity:    %.1f %%\n", humidityPercent);
   Serial.printf("Pressure:    %.1f hPa\n", pressureHpa);
   Serial.println("This is an observation, not a weather forecast.");
+
+  if (!ENABLE_WIFI_UPLOAD) {
+    Serial.println("Manual demo mode: copy these values into the local web app.");
+    return true;
+  }
 
   if (WiFi.status() != WL_CONNECTED) {
     Serial.println("Wi-Fi unavailable. Observation was not uploaded.");
@@ -135,9 +150,14 @@ void setup() {
     return;
   }
 
-  WiFi.mode(WIFI_STA);
-  printWifiScanResults();
-  connectToWifiIfNeeded();
+  if (ENABLE_WIFI_UPLOAD) {
+    WiFi.onEvent(reportWifiEvent);
+    WiFi.mode(WIFI_STA);
+    printWifiScanResults();
+    connectToWifiIfNeeded();
+  } else {
+    Serial.println("Manual demo mode enabled. Wi-Fi uploads are disabled.");
+  }
   readAndSendObservation();
   lastReadingAt = millis();
 }
@@ -148,7 +168,9 @@ void loop() {
     return;
   }
 
-  connectToWifiIfNeeded();
+  if (ENABLE_WIFI_UPLOAD) {
+    connectToWifiIfNeeded();
+  }
 
   if (millis() - lastReadingAt >= READING_INTERVAL_MS) {
     readAndSendObservation();

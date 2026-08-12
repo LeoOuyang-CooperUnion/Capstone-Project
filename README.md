@@ -12,8 +12,16 @@ authenticated local observation per minute to the JavaScript backend. The
 backend assigns its receipt timestamp and logs accepted readings. Setup is in
 [`backend/README.md`](backend/README.md).
 
-Supabase is the planned database for Milestone 3. It is deliberately not used
-yet: first we verify secure sensor-to-server delivery before storing data.
+Supabase is used in Milestone 3 to store validated observations. Manual
+Serial Monitor entries are marked separately from future automatic device
+uploads.
+
+For a local pitch demo where ESP32 Wi-Fi is unavailable, visit
+`http://localhost:3000` while the backend is running. The page accepts the
+browser-provided or manually selected location, then can validate values
+manually copied from the Arduino Serial Monitor. Those values are clearly
+labelled as a local demo entry, not an automatic device upload or stored
+history. The selected location is not treated as a verified sensor location.
 
 ## Decisions confirmed for the first deployment
 

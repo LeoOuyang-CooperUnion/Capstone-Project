@@ -1,0 +1,105 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Accessible Hyperlocal Weather Station</title>
+    <style>
+      body { font: 18px/1.45 system-ui, sans-serif; max-width: 42rem; margin: 2rem auto; padding: 0 1rem; color: #17212b; }
+      fieldset { border: 1px solid #718096; border-radius: .5rem; margin: 1rem 0; padding: 1rem; }
+      label { display: block; font-weight: 600; margin-top: .75rem; }
+      input, button { box-sizing: border-box; font: inherit; padding: .55rem; }
+      input { width: 100%; border: 1px solid #4a5568; border-radius: .25rem; }
+      button { cursor: pointer; margin-top: 1rem; border: 0; border-radius: .25rem; background: #075985; color: white; }
+      input:focus-visible, button:focus-visible { outline: 3px solid #f59e0b; outline-offset: 3px; }
+      #status { font-weight: 600; }
+      .note { color: #374151; }
+      [hidden] { display: none; }
+    </style>
+  </head>
+  <body>
+    <h1>Set Observation Location</h1>
+    <p class="note">Choose the location for this prototype observation. It is recorded as browser-provided or user-selected and is not yet verified as the sensor's physical location.</p>
+    <form id="location-form">
+      <fieldset>
+        <legend>Selected observation location</legend>
+        <button type="button" id="locate">Use my browser location</button>
+        <label>Latitude<input id="latitude" name="latitude" type="number" step="any" min="-90" max="90" required></label>
+        <label>Longitude<input id="longitude" name="longitude" type="number" step="any" min="-180" max="180" required></label>
+      </fieldset>
+      <button type="submit">Validate location</button>
+    </form>
+    <p id="status" aria-live="polite"></p>
+    <section id="waiting" hidden aria-live="polite">
+      <h2>Location validated</h2>
+      <p>The station is ready and waiting for a device observation.</p>
+    </section>
+    <section id="manual-observation" hidden>
+      <h2>Manual Serial Monitor demo</h2>
+      <p class="note">Copy the values shown by the Arduino Serial Monitor. This is a manually entered demonstration, not an automatic device upload. It is saved separately from future device uploads.</p>
+      <form id="manual-observation-form">
+        <fieldset>
+          <legend>Local observation copied from Serial Monitor</legend>
+          <label>Temperature (°C)<input name="temperatureC" type="number" step="any" min="-40" max="85" required></label>
+          <label>Relative humidity (%)<input name="humidityPercent" type="number" step="any" min="0" max="100" required></label>
+          <label>Pressure (hPa)<input name="pressureHpa" type="number" step="any" min="300" max="1100" required></label>
+        </fieldset>
+        <button type="submit">Submit manual demo observation</button>
+      </form>
+      <p id="observation-status" aria-live="polite"></p>
+    </section>
+    <script>
+      const form = document.querySelector('#location-form');
+      const status = document.querySelector('#status');
+      const waiting = document.querySelector('#waiting');
+      const manualObservation = document.querySelector('#manual-observation');
+      const manualObservationForm = document.querySelector('#manual-observation-form');
+      const observationStatus = document.querySelector('#observation-status');
+      let locationSource = 'user_selected';
+      document.querySelectorAll('#latitude, #longitude').forEach((input) => {
+        input.addEventListener('input', () => { locationSource = 'user_selected'; });
+      });
+      document.querySelector('#locate').addEventListener('click', () => {
+        if (!navigator.geolocation) { status.textContent = 'Browser location is unavailable. Enter coordinates manually.'; return; }
+        status.textContent = 'Requesting browser location...';
+        navigator.geolocation.getCurrentPosition(({ coords }) => {
+          document.querySelector('#latitude').value = coords.latitude;
+          document.querySelector('#longitude').value = coords.longitude;
+          locationSource = 'browser_geolocation';
+          status.textContent = 'Browser location added. Validate it when ready.';
+        }, () => { locationSource = 'user_selected'; status.textContent = 'Location permission was unavailable. Enter coordinates manually.'; });
+      });
+      form.addEventListener('submit', async (event) => {
+        event.preventDefault();
+        const body = Object.fromEntries(new FormData(form));
+        body.latitude = Number(body.latitude);
+        body.longitude = Number(body.longitude);
+        body.locationSource = locationSource;
+        status.textContent = 'Validating location...';
+        waiting.hidden = true;
+        try {
+          const response = await fetch('/api/location-validations', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+          const result = await response.json();
+          if (!response.ok) { status.textContent = result.error; return; }
+          status.textContent = `Location validated at ${result.validatedAt}.`;
+          waiting.hidden = false;
+          manualObservation.hidden = false;
+        } catch { status.textContent = 'Could not reach the local backend. Confirm npm start is running.'; }
+      });
+      manualObservationForm.addEventListener('submit', async (event) => {
+        event.preventDefault();
+        const body = Object.fromEntries(new FormData(manualObservationForm));
+        body.temperatureC = Number(body.temperatureC);
+        body.humidityPercent = Number(body.humidityPercent);
+        body.pressureHpa = Number(body.pressureHpa);
+        observationStatus.textContent = 'Validating manual demo observation...';
+        try {
+          const response = await fetch('/api/demo-observations', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+          const result = await response.json();
+          if (!response.ok) { observationStatus.textContent = result.error; return; }
+          observationStatus.textContent = `Manual demo observation stored at ${result.receivedAt}. It was manually entered, not automatically uploaded by the device.`;
+        } catch { observationStatus.textContent = 'Could not reach the local backend. Confirm npm start is running.'; }
+      });
+    </script>
+  </body>
+</html>
