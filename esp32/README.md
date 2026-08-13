@@ -35,38 +35,6 @@ documentation before connecting 5V.
 4. Open `bme280_serial_monitor.ino`, upload it, and open Serial Monitor at
    **115200 baud**.
 
-### Optional later Wi-Fi upload
-
-1. Change `#define ENABLE_WIFI_UPLOAD 0` to `1` in the sketch.
-2. Copy `bme280_serial_monitor/secrets.h.example` to
-   `bme280_serial_monitor/secrets.h`. This private file is already excluded
-   from Git.
-3. Enter the Wi-Fi network name and password. Set `DEVICE_ID` and
-   `DEVICE_SECRET` to the exact values in the project's root `.env` file.
-4. Set `BACKEND_URL` to the local IPv4 address of the computer running the
-   backend, including port `3000`. Do not use `localhost` or `127.0.0.1`:
-   those addresses would refer to the ESP32 itself.
-5. On the computer, start the backend from the project root with `npm start`.
-   Confirm `http://localhost:3000/health` returns `{"status":"ok"}`.
-6. Ensure the ESP32 and computer are on the same Wi-Fi network, select the
-   correct ESP32-S3 board and serial port in Arduino IDE, then upload the
-   sketch. If Windows asks, allow Node.js through the firewall on **private**
-   networks.
-7. Open Serial Monitor at **115200 baud**. After a Wi-Fi connection succeeds,
-   the sketch sends one reading immediately and then one each minute.
-
-Successful output includes `Wi-Fi connected`, the three sensor values, and
-`Observation uploaded successfully.` The backend console should log an
-`Accepted observation` with a server-assigned `receivedAt` timestamp.
-
-If the upload fails, check the HTTP status printed in Serial Monitor:
-
-- `401`: the device ID or device secret does not exactly match `.env`.
-- `400`: the payload was rejected; record the backend error message.
-- A negative HTTP status: the ESP32 cannot reach the backend; recheck the
-  computer IPv4 address, Wi-Fi network, firewall, and that `npm start` is
-  still running.
-
 This project's BME280 uses I2C address `0x76`.
 
 ### Expected output
@@ -84,6 +52,5 @@ must not be presented as outdoor neighborhood weather. Before outdoor tests,
 use a weather-resistant enclosure that shades the sensor while allowing air to
 flow around it.
 
-The backend assigns receipt timestamps. Offline flash buffering is intentionally
-deferred until a later milestone; this version waits 30 seconds between failed
-Wi-Fi connection attempts and does not hammer the backend while disconnected.
+The backend assigns receipt timestamps after the user submits the values in the
+browser.
