@@ -8,7 +8,7 @@ calls external weather providers.
 
 1. Run `npm install` from the project root.
 2. Copy `.env.example` to `.env`.
-3. Set the device, Supabase, and fixed demo-location variables. Keep `.env`
+3. Set the Supabase and default demo-location variables. Keep `.env`
    private.
 4. Back up the `measurements` table, then run
    `backend/supabase-migration.sql` in the Supabase SQL editor. The script is
@@ -42,14 +42,12 @@ order by ordinal_position;
 The currently supported path is BME280 -> ESP32-S3 -> Arduino Serial Monitor
 at 115200 baud -> manual browser entry -> backend storage and comparison.
 Copy temperature, humidity, and pressure from the Arduino Serial Monitor into
-the form. The backend adds its timestamp and the configured physical station
-location. Browser geolocation is not requested. The manual endpoint is
-restricted to requests from the computer running the backend.
+the form. Select a browser location or enter an address; the resulting editable
+coordinates are stored with the reading. The manual endpoint is restricted to
+requests from the computer running the backend.
 
-The address is registered by the computer from `DEMO_ADDRESS`; no browser
-location permission is needed. The example configuration defaults to Cooper
-Union. To demonstrate another address, geocode it before the demo and update
-the address, latitude, and longitude together in the private `.env` file.
+The example configuration defaults to Cooper Union until the user selects a
+location. Address and reverse-address lookup use OpenStreetMap Nominatim.
 
 The Leaflet map shows three explicitly labelled sources:
 
@@ -67,9 +65,14 @@ shown as unavailable rather than invented.
 - `GET /health`
 - `GET /api/demo-config`
 - `GET /api/comparisons/current`
+- `GET /api/geocode?address=...`
+- `GET /api/reverse-geocode?latitude=...&longitude=...`
 - `POST /api/demo-observations`
 - `GET /api/measurements/recent`
-- `POST /api/devices/:id/readings`
+
+The recent-measurements endpoint returns at most one measurement per station:
+the newest reading. This prevents historical readings at the same station from
+producing overlapping map points.
 
 Manual observation body:
 
@@ -77,14 +80,12 @@ Manual observation body:
 {
   "temperatureC": 21.5,
   "humidityPercent": 61.0,
-  "pressureHpa": 1010.8
+  "pressureHpa": 1010.8,
+  "address": "7 East 7th Street, New York, NY 10003",
+  "latitude": 40.729,
+  "longitude": -73.9902
 }
 ```
-
-The automatic ESP32 endpoint additionally requires the matching
-`X-Device-Secret` header. Automatic upload remains available for a later
-connected milestone, but that workflow is currently unavailable and is
-disabled in the firmware configuration. Do not depend on it for the demo.
 
 ## Hosting
 

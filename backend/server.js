@@ -1,4 +1,3 @@
-const crypto = require('node:crypto');
 const express = require('express');
 const { createClient } = require('@supabase/supabase-js');
 require('dotenv').config();
@@ -6,8 +5,6 @@ require('dotenv').config();
 const app = express();
 // Hosts such as Render provide PORT; API_PORT keeps local development on 3000.
 const port = Number(process.env.PORT || process.env.API_PORT || 3000);
-const deviceId = process.env.DEVICE_ID;
-const deviceSecret = process.env.DEVICE_SECRET;
 const supabaseUrl = process.env.SUPABASE_URL;
 const supabaseSecretKey = process.env.SUPABASE_SECRET_KEY;
 const demoLatitude = Number(process.env.DEMO_LATITUDE);
@@ -17,8 +14,8 @@ const demoAddress = process.env.DEMO_ADDRESS;
 const demoEnvironment = process.env.DEMO_ENVIRONMENT || 'indoor';
 const nwsStationLimit = Math.min(Math.max(Number(process.env.NWS_STATION_LIMIT) || 5, 1), 10);
 
-if (!deviceId || !deviceSecret || deviceSecret.startsWith('replace-this') || !supabaseUrl || !supabaseSecretKey || supabaseSecretKey.startsWith('replace-with') || !demoAddress || !Number.isFinite(demoLatitude) || !Number.isFinite(demoLongitude)) {
-  console.error('Set device, Supabase, and demo-location variables in .env before starting the server.');
+if (!supabaseUrl || !supabaseSecretKey || supabaseSecretKey.startsWith('replace-with') || !demoAddress || !Number.isFinite(demoLatitude) || !Number.isFinite(demoLongitude)) {
+  console.error('Set Supabase and demo-location variables in .env before starting the server.');
   process.exit(1);
 }
 
@@ -39,18 +36,6 @@ const supabase = createClient(supabaseUrl, supabaseSecretKey, {
 app.use(express.json({ limit: '2kb' }));
 app.use(express.static('frontend'));
 
-function hasValidDeviceSecret(request) {
-  const suppliedSecret = request.get('X-Device-Secret');
-
-  if (!suppliedSecret) {
-    return false;
-  }
-
-  const expected = Buffer.from(deviceSecret);
-  const supplied = Buffer.from(suppliedSecret);
-  return expected.length === supplied.length && crypto.timingSafeEqual(expected, supplied);
-}
-
 function isNumberInRange(value, minimum, maximum) {
   return typeof value === 'number' && Number.isFinite(value) && value >= minimum && value <= maximum;
 }
@@ -68,7 +53,31 @@ function isLocalRequest(request) {
   return address === '127.0.0.1' || address === '::1' || address === '::ffff:127.0.0.1';
 }
 
-async function storeObservation({ temperatureC, humidityPercent, pressureHpa, source }) {
+function stationIdForLocation({ latitude, longitude }) {
+  return `manual_${latitude.toFixed(4)}_${longitude.toFixed(4)}`;
+}
+
+async function upsertStation(location) {
+  const stationId = stationIdForLocation(location);
+  const { data, error } = await supabase
+    .from('stations')
+    .upsert({
+      device_id: stationId,
+      location_name: location.name,
+      location_address: location.address,
+      latitude: location.latitude,
+      longitude: location.longitude,
+      environment: demoEnvironment
+    }, { onConflict: 'device_id' })
+    .select('device_id, location_name, location_address, latitude, longitude, environment')
+    .single();
+
+  if (error) throw error;
+  return data;
+}
+
+async function storeObservation({ temperatureC, humidityPercent, pressureHpa, source, location }) {
+  const station = await upsertStation(location);
   const { data, error } = await supabase
     .from('measurements')
     .insert({
@@ -76,20 +85,16 @@ async function storeObservation({ temperatureC, humidityPercent, pressureHpa, so
       humidity_percent: humidityPercent,
       pressure_hpa: pressureHpa,
       source,
-      latitude: demoLatitude,
-      longitude: demoLongitude,
-      location_name: demoLocationName,
-      location_address: demoAddress,
-      environment: demoEnvironment
+      station_id: station.device_id
     })
-    .select('id, received_at, temperature_c, humidity_percent, pressure_hpa, source, latitude, longitude, location_name, location_address, environment')
+    .select('id, received_at, temperature_c, humidity_percent, pressure_hpa, source, station_id')
     .single();
 
   if (error) {
     throw error;
   }
 
-  return data;
+  return { ...data, station };
 }
 
 app.get('/health', (_request, response) => {
@@ -136,10 +141,10 @@ async function fetchJson(url, headers = {}) {
   return upstreamResponse.json();
 }
 
-async function getOpenMeteoConditions() {
+async function getOpenMeteoConditions(latitude, longitude) {
   const parameters = new URLSearchParams({
-    latitude: String(demoLatitude),
-    longitude: String(demoLongitude),
+    latitude: String(latitude),
+    longitude: String(longitude),
     current: 'temperature_2m,relative_humidity_2m,surface_pressure',
     temperature_unit: 'celsius',
     timezone: 'auto',
@@ -160,9 +165,9 @@ async function getOpenMeteoConditions() {
   };
 }
 
-async function getNwsStations() {
+async function getNwsStations(latitude, longitude) {
   const stationsDocument = await fetchJson(
-    `https://api.weather.gov/points/${demoLatitude},${demoLongitude}/stations`
+    `https://api.weather.gov/points/${latitude},${longitude}/stations`
   );
   const stationFeatures = (stationsDocument.features || []).slice(0, nwsStationLimit);
   const observations = await Promise.allSettled(stationFeatures.map(async (station) => {
@@ -191,10 +196,15 @@ async function getNwsStations() {
     .filter((station) => Number.isFinite(station.latitude) && Number.isFinite(station.longitude));
 }
 
-app.get('/api/comparisons/current', async (_request, response) => {
+app.get('/api/comparisons/current', async (request, response) => {
+  const latitude = Number(request.query.latitude ?? demoLatitude);
+  const longitude = Number(request.query.longitude ?? demoLongitude);
+  if (!isNumberInRange(latitude, -90, 90) || !isNumberInRange(longitude, -180, 180)) {
+    return response.status(400).json({ error: 'Valid latitude and longitude query parameters are required.' });
+  }
   const [modelResult, stationsResult] = await Promise.allSettled([
-    getOpenMeteoConditions(),
-    getNwsStations()
+    getOpenMeteoConditions(latitude, longitude),
+    getNwsStations(latitude, longitude)
   ]);
 
   return response.json({
@@ -208,27 +218,32 @@ app.get('/api/comparisons/current', async (_request, response) => {
   });
 });
 
-app.post('/api/devices/:id/readings', async (request, response, next) => {
-  if (request.params.id !== deviceId || !hasValidDeviceSecret(request)) {
-    return response.status(401).json({ error: 'Invalid device credential.' });
+app.get('/api/geocode', async (request, response, next) => {
+  const address = String(request.query.address || '').trim();
+  if (address.length < 3 || address.length > 200) {
+    return response.status(400).json({ error: 'Enter an address between 3 and 200 characters.' });
   }
-
-  const { temperatureC, humidityPercent, pressureHpa } = request.body;
-
-  if (
-    !isNumberInRange(temperatureC, -40, 85) ||
-    !isNumberInRange(humidityPercent, 0, 100) ||
-    !isNumberInRange(pressureHpa, 300, 1100)
-  ) {
-    return response.status(400).json({
-      error: 'Expected finite temperatureC (-40–85), humidityPercent (0–100), and pressureHpa (300–1100).'
-    });
-  }
-
   try {
-    const observation = await storeObservation({ temperatureC, humidityPercent, pressureHpa, source: 'device_upload' });
-    console.log('Device observation stored:', { deviceId, id: observation.id, receivedAt: observation.received_at });
-    return response.status(201).json({ accepted: true, receivedAt: observation.received_at, id: observation.id });
+    const parameters = new URLSearchParams({ q: address, format: 'jsonv2', limit: '1' });
+    const results = await fetchJson(`https://nominatim.openstreetmap.org/search?${parameters}`);
+    const match = results[0];
+    if (!match) return response.status(404).json({ error: 'No coordinates were found for that address.' });
+    return response.json({ address: match.display_name, latitude: Number(match.lat), longitude: Number(match.lon) });
+  } catch (error) {
+    return next(error);
+  }
+});
+
+app.get('/api/reverse-geocode', async (request, response, next) => {
+  const latitude = Number(request.query.latitude);
+  const longitude = Number(request.query.longitude);
+  if (!isNumberInRange(latitude, -90, 90) || !isNumberInRange(longitude, -180, 180)) {
+    return response.status(400).json({ error: 'Valid latitude and longitude are required.' });
+  }
+  try {
+    const parameters = new URLSearchParams({ lat: String(latitude), lon: String(longitude), format: 'jsonv2' });
+    const result = await fetchJson(`https://nominatim.openstreetmap.org/reverse?${parameters}`);
+    return response.json({ address: result.display_name || 'Current location', latitude, longitude });
   } catch (error) {
     return next(error);
   }
@@ -239,15 +254,27 @@ app.post('/api/demo-observations', async (request, response, next) => {
     return response.status(403).json({ error: 'Manual demo observations are available only from this computer.' });
   }
 
-  const { temperatureC, humidityPercent, pressureHpa } = request.body;
+  const { temperatureC, humidityPercent, pressureHpa, latitude, longitude, address } = request.body;
   if (!hasValidObservationValues({ temperatureC, humidityPercent, pressureHpa })) {
     return response.status(400).json({
       error: 'Expected finite temperatureC (-40–85), humidityPercent (0–100), and pressureHpa (300–1100).'
     });
   }
+  if (!isNumberInRange(latitude, -90, 90) || !isNumberInRange(longitude, -180, 180)) {
+    return response.status(400).json({ error: 'Select a valid location before storing the observation.' });
+  }
+  const locationAddress = typeof address === 'string' && address.trim()
+    ? address.trim().slice(0, 300)
+    : 'Selected coordinates';
 
   try {
-    const observation = await storeObservation({ temperatureC, humidityPercent, pressureHpa, source: 'manual_serial_monitor_entry' });
+    const observation = await storeObservation({
+      temperatureC,
+      humidityPercent,
+      pressureHpa,
+      source: 'manual_browser_entry',
+      location: { latitude, longitude, address: locationAddress, name: 'User-selected location' }
+    });
     console.log('Manual demo observation stored:', { id: observation.id, receivedAt: observation.received_at });
     return response.status(201).json({
       accepted: true,
@@ -255,11 +282,12 @@ app.post('/api/demo-observations', async (request, response, next) => {
       id: observation.id,
       source: observation.source,
       station: {
-        name: observation.location_name,
-        address: observation.location_address,
-        latitude: observation.latitude,
-        longitude: observation.longitude,
-        environment: observation.environment
+        id: observation.station.device_id,
+        name: observation.station.location_name,
+        address: observation.station.location_address,
+        latitude: observation.station.latitude,
+        longitude: observation.station.longitude,
+        environment: observation.station.environment
       },
       measurement: {
         temperatureC: observation.temperature_c,
@@ -276,15 +304,24 @@ app.get('/api/measurements/recent', async (_request, response, next) => {
   try {
     const { data, error } = await supabase
       .from('measurements')
-      .select('id, received_at, temperature_c, humidity_percent, pressure_hpa, source, latitude, longitude, location_name, location_address, environment')
+      .select('id, received_at, temperature_c, humidity_percent, pressure_hpa, source, station_id, stations!inner(device_id, location_name, location_address, latitude, longitude, environment)')
       .order('received_at', { ascending: false })
-      .limit(50);
+      .limit(500);
 
     if (error) {
       throw error;
     }
 
-    return response.json({ measurements: data });
+    const latestByStation = [];
+    const seenStations = new Set();
+    for (const measurement of data) {
+      if (seenStations.has(measurement.station_id)) continue;
+      seenStations.add(measurement.station_id);
+      latestByStation.push(measurement);
+      if (latestByStation.length === 50) break;
+    }
+
+    return response.json({ measurements: latestByStation, aggregation: 'latest_per_station' });
   } catch (error) {
     return next(error);
   }

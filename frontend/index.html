@@ -25,6 +25,8 @@
       .map-tools label { flex: 1 1 16rem; margin: 0; }
       .map-tools button { width: auto; flex: 0 1 auto; margin: 0; }
       #status, #comparison-status { font-weight: 650; }
+      #location-status { font-weight: 650; padding: .55rem; background: #eef6fa; border-radius: .35rem; }
+      .coordinate-row { display: grid; grid-template-columns: 1fr 1fr; gap: .5rem; }
       .note { color: #374151; }
       .legend { display: flex; flex-wrap: wrap; gap: .6rem 1rem; margin: .7rem 0; }
       .key::before { content: ''; display: inline-block; width: .8rem; height: .8rem; margin-right: .35rem; border-radius: 50%; background: var(--color); }
@@ -41,17 +43,28 @@
   <body>
     <header>
       <h1>Hyperlocal Weather Comparison</h1>
-      <p><strong>Supported demo workflow:</strong> BME280 &rarr; ESP32-S3 &rarr; Arduino Serial Monitor at 115200 baud &rarr; manually enter all three values below &rarr; store and compare.</p>
-      <p class="note">Wi-Fi upload from the ESP32 is currently unavailable. Manual entry and storage do not depend on the map, map tiles, NWS, Open-Meteo, or other external services.</p>
+      <p>Enter a weather reading manually, choose its location, then store and compare it with nearby weather data.</p>
     </header>
     <main class="grid">
       <section class="card">
         <h2>Enter BME280 reading</h2>
         <p id="station-description">Loading configured demonstration station…</p>
-        <p class="note">Copy these values from the Arduino Serial Monitor. The backend assigns the timestamp and fixed station location.</p>
+        <p class="note">Enter the three sensor values manually, then choose where the reading was taken.</p>
         <form id="observation-form">
           <fieldset>
-            <legend>Manual Serial Monitor entry</legend>
+            <legend>Reading location</legend>
+            <button id="use-current-location" type="button">Use my current location</button>
+            <label for="address">Or enter an address</label>
+            <input id="address" name="address" type="text" maxlength="200" autocomplete="street-address" placeholder="Street, city, state, or postal code">
+            <button id="find-address" type="button">Convert address to coordinates</button>
+            <div class="coordinate-row">
+              <label for="latitude">Latitude<input id="latitude" name="latitude" type="number" step="any" min="-90" max="90" required></label>
+              <label for="longitude">Longitude<input id="longitude" name="longitude" type="number" step="any" min="-180" max="180" required></label>
+            </div>
+            <p id="location-status" aria-live="polite">Choose your current location or enter an address.</p>
+          </fieldset>
+          <fieldset>
+            <legend>Manual weather reading</legend>
             <label>Temperature (°C)<input name="temperatureC" type="number" step="any" min="-40" max="85" required></label>
             <label>Relative humidity (%)<input name="humidityPercent" type="number" step="any" min="0" max="100" required></label>
             <label>Surface pressure (hPa)<input name="pressureHpa" type="number" step="any" min="300" max="1100" required></label>
@@ -109,6 +122,12 @@
       const comparisonPointSelect = document.querySelector('#comparison-point');
       const showAllPointsButton = document.querySelector('#show-all-points');
       const focusDemoStationButton = document.querySelector('#focus-demo-station');
+      const currentLocationButton = document.querySelector('#use-current-location');
+      const findAddressButton = document.querySelector('#find-address');
+      const addressInput = document.querySelector('#address');
+      const latitudeInput = document.querySelector('#latitude');
+      const longitudeInput = document.querySelector('#longitude');
+      const locationStatus = document.querySelector('#location-status');
       let station;
       let localObservation;
       let comparisonData = { model: null, stations: [] };
@@ -130,6 +149,71 @@
         if (!value) return 'Unavailable';
         const parsed = new Date(value);
         return Number.isNaN(parsed.valueOf()) ? value : parsed.toLocaleString();
+      }
+
+      function applyLocation({ latitude, longitude, address }) {
+        latitudeInput.value = Number(latitude).toFixed(6);
+        longitudeInput.value = Number(longitude).toFixed(6);
+        if (address) addressInput.value = address;
+        station = {
+          ...station,
+          name: 'Your selected location',
+          address: address || 'Selected coordinates',
+          latitude: Number(latitude),
+          longitude: Number(longitude)
+        };
+        document.querySelector('#station-description').textContent = `${station.address} — ${station.latitude.toFixed(4)}, ${station.longitude.toFixed(4)}`;
+        locationStatus.textContent = `Location selected: ${station.latitude.toFixed(6)}, ${station.longitude.toFixed(6)}.`;
+        if (map) {
+          drawMarkers();
+          map.flyTo([station.latitude, station.longitude], 13);
+        }
+        loadComparisons();
+      }
+
+      async function requestCurrentLocation() {
+        if (!navigator.geolocation) {
+          locationStatus.textContent = 'This browser does not support location access. Enter an address instead.';
+          return;
+        }
+        currentLocationButton.disabled = true;
+        locationStatus.textContent = 'Waiting for browser location permission…';
+        navigator.geolocation.getCurrentPosition(async ({ coords }) => {
+          let address = 'Current browser location';
+          try {
+            const query = new URLSearchParams({ latitude: coords.latitude, longitude: coords.longitude });
+            const response = await fetch(`/api/reverse-geocode?${query}`);
+            const result = await response.json();
+            if (response.ok) address = result.address;
+          } catch { /* Coordinates remain usable if address lookup is unavailable. */ }
+          applyLocation({ latitude: coords.latitude, longitude: coords.longitude, address });
+          currentLocationButton.disabled = false;
+        }, (error) => {
+          locationStatus.textContent = error.code === 1
+            ? 'Location permission was denied. You can enter an address instead.'
+            : 'Your location could not be determined. Try entering an address.';
+          currentLocationButton.disabled = false;
+        }, { enableHighAccuracy: true, timeout: 10000, maximumAge: 300000 });
+      }
+
+      async function findAddress() {
+        const address = addressInput.value.trim();
+        if (!address) {
+          locationStatus.textContent = 'Enter an address first.';
+          return;
+        }
+        findAddressButton.disabled = true;
+        locationStatus.textContent = 'Converting address to coordinates…';
+        try {
+          const response = await fetch(`/api/geocode?${new URLSearchParams({ address })}`);
+          const result = await response.json();
+          if (!response.ok) throw new Error(result.error || 'Address lookup failed.');
+          applyLocation(result);
+        } catch (error) {
+          locationStatus.textContent = error.message || 'Address lookup is unavailable.';
+        } finally {
+          findAddressButton.disabled = false;
+        }
       }
 
       function escapeHtml(value) {
@@ -224,7 +308,8 @@
       async function loadComparisons() {
         comparisonStatus.textContent = 'Loading Open-Meteo and nearby NWS data…';
         try {
-          const response = await fetch('/api/comparisons/current');
+          const query = station ? `?${new URLSearchParams({ latitude: station.latitude, longitude: station.longitude })}` : '';
+          const response = await fetch(`/api/comparisons/current${query}`);
           const result = await response.json();
           if (!response.ok) throw new Error(result.error || 'Comparison request failed.');
           comparisonData = result;
@@ -244,6 +329,10 @@
           const result = await response.json();
           if (!response.ok) throw new Error();
           station = result.station;
+          latitudeInput.value = station.latitude;
+          longitudeInput.value = station.longitude;
+          addressInput.value = station.address;
+          locationStatus.textContent = 'Using the configured default. Choose your location or enter an address to change it.';
           document.querySelector('#station-description').textContent = `${station.name} — ${station.address} — ${station.latitude.toFixed(4)}, ${station.longitude.toFixed(4)} — ${station.environment}`;
           drawTextComparison();
         } catch {
@@ -291,9 +380,10 @@
 
       form.addEventListener('submit', async (event) => {
         event.preventDefault();
-        const submitButton = form.querySelector('button');
+        const submitButton = form.querySelector('button[type="submit"]');
         const body = Object.fromEntries(new FormData(form));
-        for (const key of Object.keys(body)) body[key] = Number(body[key]);
+        for (const key of ['temperatureC', 'humidityPercent', 'pressureHpa', 'latitude', 'longitude']) body[key] = Number(body[key]);
+        applyLocation({ latitude: body.latitude, longitude: body.longitude, address: body.address });
         status.textContent = 'Storing manual demo observation…';
         submitButton.disabled = true;
         try {
@@ -308,7 +398,7 @@
           document.querySelector('#local-humidity').textContent = formatValue(localObservation.humidityPercent, 'humidityPercent');
           document.querySelector('#local-pressure').textContent = formatValue(localObservation.pressureHpa, 'pressureHpa');
           document.querySelector('#latest-reading').hidden = false;
-          status.textContent = `Stored at ${formatTime(result.receivedAt)} as a manual Serial Monitor entry.`;
+          status.textContent = `Stored at ${formatTime(result.receivedAt)} as a manual browser entry.`;
           drawMarkers();
           drawTextComparison();
           await loadComparisons();
@@ -328,6 +418,14 @@
       });
       showAllPointsButton.addEventListener('click', showAllPoints);
       focusDemoStationButton.addEventListener('click', focusDemoStation);
+      currentLocationButton.addEventListener('click', requestCurrentLocation);
+      findAddressButton.addEventListener('click', findAddress);
+      addressInput.addEventListener('keydown', (event) => {
+        if (event.key === 'Enter') {
+          event.preventDefault();
+          findAddress();
+        }
+      });
       initialize();
     </script>
   </body>
