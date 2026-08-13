@@ -24,8 +24,9 @@
       .map-tools { display: flex; flex-wrap: wrap; gap: .5rem; margin: .75rem 0; align-items: end; }
       .map-tools label { flex: 1 1 16rem; margin: 0; }
       .map-tools button { width: auto; flex: 0 1 auto; margin: 0; }
-      #status, #comparison-status { font-weight: 650; }
+      #status, #comparison-status, #registration-status { font-weight: 650; }
       .note { color: #374151; }
+      .secondary { background: #475569; }
       .legend { display: flex; flex-wrap: wrap; gap: .6rem 1rem; margin: .7rem 0; }
       .key::before { content: ''; display: inline-block; width: .8rem; height: .8rem; margin-right: .35rem; border-radius: 50%; background: var(--color); }
       .metric-row { display: grid; grid-template-columns: repeat(3, 1fr); gap: .5rem; }
@@ -33,6 +34,11 @@
       .metric strong { display: block; font-size: 1.15rem; }
       .comparison-list { padding-left: 1.25rem; }
       .comparison-list li { margin-block: .45rem; }
+      .suggestions { list-style: none; margin: .25rem 0 0; padding: 0; border: 1px solid #94a3b8; border-radius: .3rem; }
+      .suggestions:empty { display: none; }
+      .suggestions button { margin: 0; width: 100%; border-radius: 0; border-bottom: 1px solid #cbd5e1; background: white; color: #17212b; text-align: left; font-weight: 500; }
+      .suggestions li:last-child button { border-bottom: 0; }
+      .suggestions button:hover, .suggestions button:focus-visible { background: #e0f2fe; }
       .leaflet-popup-content { line-height: 1.45; }
       [hidden] { display: none !important; }
       @media (max-width: 800px) { .grid { grid-template-columns: 1fr; } #map { height: 27rem; } }
@@ -45,6 +51,31 @@
     </header>
     <main class="grid">
       <section class="card">
+        <h2>Station location</h2>
+        <p class="note">Choose browser location or enter a U.S. address. Address lookup sends the address to the U.S. Census Geocoder and returns estimated coordinates based on an address range. Review the result before saving.</p>
+        <form id="registration-form">
+          <fieldset>
+            <legend>Browser-assisted station registration</legend>
+            <label>Station name<input name="name" maxlength="100" required></label>
+            <label for="station-address">U.S. address or location description</label>
+            <input id="station-address" name="address" maxlength="300" autocomplete="off" aria-autocomplete="list" aria-controls="address-suggestions" aria-expanded="false">
+            <ul id="address-suggestions" class="suggestions" role="listbox" aria-label="Address suggestions"></ul>
+            <button id="geocode-address" class="secondary" type="button">Estimate coordinates from address</button>
+            <label>Environment
+              <select name="environment" required>
+                <option value="indoor">Indoor</option>
+                <option value="outdoor">Outdoor</option>
+              </select>
+            </label>
+            <label>Latitude<input name="latitude" type="number" step="any" readonly required></label>
+            <label>Longitude<input name="longitude" type="number" step="any" readonly required></label>
+            <label>Browser-reported accuracy (meters, unavailable for address estimates)<input name="accuracyMeters" type="number" step="any" readonly></label>
+          </fieldset>
+          <button id="request-location" class="secondary" type="button">Use my current location</button>
+          <button id="save-registration" type="submit" disabled>Confirm and save station location</button>
+        </form>
+        <p id="registration-status" aria-live="polite"></p>
+
         <h2>Enter BME280 reading</h2>
         <p id="station-description">Loading configured demonstration station…</p>
         <p class="note">Copy these values from the Arduino Serial Monitor. The backend assigns the timestamp and fixed station location.</p>
@@ -101,6 +132,13 @@
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
     <script>
       const form = document.querySelector('#observation-form');
+      const registrationForm = document.querySelector('#registration-form');
+      const registrationStatus = document.querySelector('#registration-status');
+      const requestLocationButton = document.querySelector('#request-location');
+      const geocodeAddressButton = document.querySelector('#geocode-address');
+      const saveRegistrationButton = document.querySelector('#save-registration');
+      const addressInput = registrationForm.elements.address;
+      const addressSuggestions = document.querySelector('#address-suggestions');
       const status = document.querySelector('#status');
       const comparisonStatus = document.querySelector('#comparison-status');
       const metricSelect = document.querySelector('#metric');
@@ -113,6 +151,9 @@
       let comparisonData = { model: null, stations: [] };
       let map;
       let markerLayer;
+      let registrationPreviewMarker;
+      let addressSuggestionTimer;
+      let addressSuggestionController;
       let navigableMarkers = [];
 
       const metricMetadata = {
@@ -131,6 +172,36 @@
         return Number.isNaN(parsed.valueOf()) ? value : parsed.toLocaleString();
       }
 
+      function escapeHtml(value) {
+        const element = document.createElement('span');
+        element.textContent = String(value ?? '');
+        return element.innerHTML;
+      }
+
+      function displayStation() {
+        const address = station.address || 'Address not provided';
+        const accuracy = Number.isFinite(station.accuracyMeters) ? ` — accuracy approximately ${station.accuracyMeters.toFixed(0)} m` : '';
+        document.querySelector('#station-description').textContent = `${station.name} — ${address} — ${station.latitude.toFixed(4)}, ${station.longitude.toFixed(4)} — ${station.environment}${accuracy}`;
+        registrationForm.elements.name.value = station.name;
+        registrationForm.elements.address.value = station.address || '';
+        registrationForm.elements.environment.value = station.environment;
+        registrationForm.elements.latitude.value = station.locationSource === 'station_registration' ? station.latitude : '';
+        registrationForm.elements.longitude.value = station.locationSource === 'station_registration' ? station.longitude : '';
+        registrationForm.elements.accuracyMeters.value = Number.isFinite(station.accuracyMeters) ? station.accuracyMeters : '';
+      }
+
+      function observationSourceLabel(source) {
+        return source === 'device_upload' ? 'Direct ESP32 upload' : 'Manual Serial Monitor entry';
+      }
+
+      function showLocalObservation() {
+        if (!localObservation) return;
+        document.querySelector('#local-temperature').textContent = formatValue(localObservation.temperatureC, 'temperatureC');
+        document.querySelector('#local-humidity').textContent = formatValue(localObservation.humidityPercent, 'humidityPercent');
+        document.querySelector('#local-pressure').textContent = formatValue(localObservation.pressureHpa, 'pressureHpa');
+        document.querySelector('#latest-reading').hidden = false;
+      }
+
       function markerRadius(value, metric) {
         if (!Number.isFinite(value)) return 8;
         if (metric === 'temperatureC') return Math.max(7, Math.min(18, 9 + value / 8));
@@ -144,14 +215,14 @@
         const marker = L.circleMarker([item.latitude, item.longitude], {
           radius: markerRadius(value, metric), color, fillColor: color, fillOpacity: .78, weight: 2
         });
-        marker.bindTooltip(`${item.name}: ${formatValue(value, metric)}`);
+        marker.bindTooltip(`${escapeHtml(item.name)}: ${escapeHtml(formatValue(value, metric))}`);
         marker.bindPopup(`
-          <strong>${item.name}</strong><br>
-          ${label}<br>
-          Temperature: ${formatValue(item.temperatureC, 'temperatureC')}<br>
-          Humidity: ${formatValue(item.humidityPercent, 'humidityPercent')}<br>
-          Pressure: ${formatValue(item.pressureHpa, 'pressureHpa')} (${item.pressureType || 'surface pressure'})<br>
-          Time: ${formatTime(item.observedAt)}
+          <strong>${escapeHtml(item.name)}</strong><br>
+          ${escapeHtml(label)}<br>
+          Temperature: ${escapeHtml(formatValue(item.temperatureC, 'temperatureC'))}<br>
+          Humidity: ${escapeHtml(formatValue(item.humidityPercent, 'humidityPercent'))}<br>
+          Pressure: ${escapeHtml(formatValue(item.pressureHpa, 'pressureHpa'))} (${escapeHtml(item.pressureType || 'surface pressure')})<br>
+          Time: ${escapeHtml(formatTime(item.observedAt))}
         `);
         marker.addTo(markerLayer);
         navigableMarkers.push({ marker, name: `${label}: ${item.name}` });
@@ -165,8 +236,8 @@
 
       function drawTextComparison() {
         const items = [];
-        if (localObservation) items.push(describeItem({ ...localObservation, name: station.name, pressureType: 'surface_pressure' }, `Manual BME280 ${station.environment} observation`));
-        else items.push(`Manual BME280 ${station.environment} observation at ${station.name}: waiting for an entry.`);
+        if (localObservation) items.push(describeItem({ ...localObservation, name: station.name, pressureType: 'surface_pressure' }, `${observationSourceLabel(localObservation.source)}: BME280 ${station.environment} observation`));
+        else items.push(`BME280 ${station.environment} observation at ${station.name}: waiting for an entry or device upload.`);
         for (const nearby of comparisonData.stations || []) items.push(describeItem(nearby, 'NWS physical station observation'));
         if (comparisonData.model) items.push(describeItem(comparisonData.model, 'Open-Meteo model output'));
         comparisonList.replaceChildren(...items.map((description) => {
@@ -184,10 +255,10 @@
         if (comparisonData.model) addWeatherMarker(comparisonData.model, '#7e22ce', metric, 'Open-Meteo model output');
         for (const nearby of comparisonData.stations || []) addWeatherMarker(nearby, '#15803d', metric, 'NWS physical station observation');
         if (localObservation) {
-          addWeatherMarker({ ...localObservation, ...station, name: station.name, pressureType: 'surface_pressure' }, '#075985', metric, `Your BME280 (${station.environment})`);
+          addWeatherMarker({ ...localObservation, ...station, name: station.name, pressureType: 'surface_pressure' }, '#075985', metric, `${observationSourceLabel(localObservation.source)}: BME280 (${station.environment})`);
         } else {
           const waitingMarker = L.circleMarker([station.latitude, station.longitude], { radius: 10, color: '#075985', fillColor: '#075985', fillOpacity: .35 })
-            .bindPopup(`<strong>${station.name}</strong><br>Waiting for a BME280 reading.<br>Environment: ${station.environment}`)
+            .bindPopup(`<strong>${escapeHtml(station.name)}</strong><br>Waiting for a BME280 reading.<br>Environment: ${escapeHtml(station.environment)}`)
             .addTo(markerLayer);
           navigableMarkers.push({ marker: waitingMarker, name: `Demo station: ${station.name}` });
         }
@@ -230,13 +301,93 @@
         }
       }
 
+      function previewRegistrationLocation(latitude, longitude, description) {
+        if (!map) return;
+        if (registrationPreviewMarker) registrationPreviewMarker.remove();
+        registrationPreviewMarker = L.circleMarker([latitude, longitude], {
+          radius: 11,
+          color: '#b45309',
+          fillColor: '#f59e0b',
+          fillOpacity: .65,
+          weight: 3,
+          dashArray: '5 4'
+        })
+          .bindPopup(`<strong>Unsaved station-location preview</strong><br>${escapeHtml(description)}`)
+          .addTo(map)
+          .openPopup();
+        map.flyTo([latitude, longitude], 15);
+      }
+
+      function clearAddressSuggestions() {
+        addressSuggestions.replaceChildren();
+        addressInput.setAttribute('aria-expanded', 'false');
+      }
+
+      function clearPendingRegistrationLocation() {
+        registrationForm.elements.latitude.value = '';
+        registrationForm.elements.longitude.value = '';
+        registrationForm.elements.accuracyMeters.value = '';
+        saveRegistrationButton.disabled = true;
+        if (registrationPreviewMarker) {
+          registrationPreviewMarker.remove();
+          registrationPreviewMarker = undefined;
+        }
+      }
+
+      function replaceAutomaticStationName(name) {
+        const automaticNames = new Set([station.name, 'Current location station', 'Address-based station']);
+        if (automaticNames.has(registrationForm.elements.name.value)) {
+          registrationForm.elements.name.value = name;
+        }
+      }
+
+      function renderAddressSuggestions(suggestions) {
+        clearAddressSuggestions();
+        for (const suggestion of suggestions) {
+          const item = document.createElement('li');
+          item.setAttribute('role', 'option');
+          const button = document.createElement('button');
+          button.type = 'button';
+          button.textContent = suggestion.address;
+          button.addEventListener('click', () => {
+            clearPendingRegistrationLocation();
+            addressInput.value = suggestion.address;
+            replaceAutomaticStationName('Address-based station');
+            clearAddressSuggestions();
+            registrationStatus.textContent = 'Address suggestion selected. Choose “Estimate coordinates from address” to look up and preview its coordinates.';
+          });
+          item.append(button);
+          addressSuggestions.append(item);
+        }
+        addressInput.setAttribute('aria-expanded', String(suggestions.length > 0));
+      }
+
+      async function loadLatestStoredObservation() {
+        const response = await fetch('/api/measurements/recent');
+        const result = await response.json();
+        if (!response.ok) throw new Error(result.error || 'Recent measurement request failed.');
+        const latest = (result.measurements || []).find((measurement) =>
+          Number(measurement.latitude) === station.latitude &&
+          Number(measurement.longitude) === station.longitude
+        );
+        if (!latest) return;
+        localObservation = {
+          temperatureC: Number(latest.temperature_c),
+          humidityPercent: Number(latest.humidity_percent),
+          pressureHpa: Number(latest.pressure_hpa),
+          observedAt: latest.received_at,
+          source: latest.source
+        };
+        showLocalObservation();
+      }
+
       async function initialize() {
         try {
           const response = await fetch('/api/demo-config');
           const result = await response.json();
           if (!response.ok) throw new Error();
           station = result.station;
-          document.querySelector('#station-description').textContent = `${station.name} — ${station.address} — ${station.latitude.toFixed(4)}, ${station.longitude.toFixed(4)} — ${station.environment}`;
+          displayStation();
           map = L.map('map').setView([station.latitude, station.longitude], 9);
           const mapResizeObserver = new ResizeObserver(() => map.invalidateSize({ pan: false }));
           mapResizeObserver.observe(document.querySelector('#map'));
@@ -255,6 +406,11 @@
           });
           baseLayer.addTo(map);
           markerLayer = L.layerGroup().addTo(map);
+          try {
+            await loadLatestStoredObservation();
+          } catch {
+            status.textContent = 'Stored readings are temporarily unavailable; manual entry is still available.';
+          }
           drawMarkers();
           await loadComparisons();
         } catch {
@@ -277,11 +433,8 @@
           });
           const result = await response.json();
           if (!response.ok) { status.textContent = result.error; return; }
-          localObservation = { ...result.measurement, observedAt: result.receivedAt };
-          document.querySelector('#local-temperature').textContent = formatValue(localObservation.temperatureC, 'temperatureC');
-          document.querySelector('#local-humidity').textContent = formatValue(localObservation.humidityPercent, 'humidityPercent');
-          document.querySelector('#local-pressure').textContent = formatValue(localObservation.pressureHpa, 'pressureHpa');
-          document.querySelector('#latest-reading').hidden = false;
+          localObservation = { ...result.measurement, observedAt: result.receivedAt, source: result.source };
+          showLocalObservation();
           status.textContent = `Stored at ${formatTime(result.receivedAt)} as a manual Serial Monitor entry.`;
           drawMarkers();
           await loadComparisons();
@@ -289,6 +442,141 @@
           status.textContent = 'Could not reach the local backend. Confirm npm start is running.';
         } finally {
           submitButton.disabled = false;
+        }
+      });
+
+      requestLocationButton.addEventListener('click', () => {
+        clearPendingRegistrationLocation();
+        if (!navigator.geolocation) {
+          registrationStatus.textContent = 'This browser does not provide geolocation.';
+          return;
+        }
+        clearTimeout(addressSuggestionTimer);
+        addressSuggestionController?.abort();
+        clearAddressSuggestions();
+        addressInput.value = '';
+        replaceAutomaticStationName('Current location station');
+        registrationStatus.textContent = 'Waiting for browser location permission…';
+        requestLocationButton.disabled = true;
+        navigator.geolocation.getCurrentPosition(({ coords }) => {
+          registrationForm.elements.latitude.value = coords.latitude.toFixed(6);
+          registrationForm.elements.longitude.value = coords.longitude.toFixed(6);
+          registrationForm.elements.accuracyMeters.value = coords.accuracy.toFixed(1);
+          previewRegistrationLocation(
+            coords.latitude,
+            coords.longitude,
+            `Browser-reported coordinates; accuracy approximately ${coords.accuracy.toFixed(0)} meters. Review before saving.`
+          );
+          saveRegistrationButton.disabled = false;
+          registrationStatus.textContent = `Coordinates received with approximately ${coords.accuracy.toFixed(0)} meters accuracy. Browsers do not provide a street address; add one only if you want it stored, then review and confirm.`;
+          requestLocationButton.disabled = false;
+        }, (error) => {
+          registrationStatus.textContent = error.code === 1
+            ? 'Location permission was denied. The current registered or configured station remains active.'
+            : 'The browser could not determine a location. Try again or keep the current station.';
+          requestLocationButton.disabled = false;
+        }, { enableHighAccuracy: true, timeout: 15000, maximumAge: 0 });
+      });
+
+      geocodeAddressButton.addEventListener('click', async () => {
+        clearPendingRegistrationLocation();
+        const address = registrationForm.elements.address.value.trim();
+        if (!address) {
+          registrationStatus.textContent = 'Enter a complete U.S. street address, including city and state or ZIP code.';
+          registrationForm.elements.address.focus();
+          return;
+        }
+        replaceAutomaticStationName('Address-based station');
+        geocodeAddressButton.disabled = true;
+        registrationStatus.textContent = 'Requesting an estimated coordinate match from the U.S. Census Geocoder…';
+        try {
+          const response = await fetch('/api/geocode-address', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ address })
+          });
+          const result = await response.json();
+          if (!response.ok) throw new Error(result.error || 'Address lookup failed.');
+          replaceAutomaticStationName('Address-based station');
+          registrationForm.elements.address.value = result.match.address;
+          registrationForm.elements.latitude.value = result.match.latitude.toFixed(6);
+          registrationForm.elements.longitude.value = result.match.longitude.toFixed(6);
+          registrationForm.elements.accuracyMeters.value = '';
+          previewRegistrationLocation(
+            result.match.latitude,
+            result.match.longitude,
+            'Estimated U.S. Census address-range match; meter accuracy is unavailable. Review before saving.'
+          );
+          saveRegistrationButton.disabled = false;
+          registrationStatus.textContent = 'Estimated Census address-range match received. Review the normalized address and coordinates on the map after saving; no meter-accuracy estimate is available.';
+        } catch (error) {
+          registrationStatus.textContent = error.message;
+        } finally {
+          geocodeAddressButton.disabled = false;
+        }
+      });
+
+      addressInput.addEventListener('input', () => {
+        clearTimeout(addressSuggestionTimer);
+        addressSuggestionController?.abort();
+        clearAddressSuggestions();
+        clearPendingRegistrationLocation();
+        const query = addressInput.value.trim();
+        if (query.length < 3) return;
+        addressSuggestionTimer = setTimeout(async () => {
+          addressSuggestionController = new AbortController();
+          try {
+            const response = await fetch(`/api/address-suggestions?q=${encodeURIComponent(query)}`, {
+              signal: addressSuggestionController.signal
+            });
+            const result = await response.json();
+            if (!response.ok) throw new Error(result.error || 'Address suggestions failed.');
+            if (addressInput.value.trim() === query) renderAddressSuggestions(result.suggestions || []);
+          } catch (error) {
+            if (error.name !== 'AbortError') registrationStatus.textContent = error.message;
+          }
+        }, 400);
+      });
+
+      addressInput.addEventListener('keydown', (event) => {
+        if (event.key !== 'ArrowDown') return;
+        const firstSuggestion = addressSuggestions.querySelector('button');
+        if (firstSuggestion) {
+          event.preventDefault();
+          firstSuggestion.focus();
+        }
+      });
+
+      registrationForm.addEventListener('submit', async (event) => {
+        event.preventDefault();
+        const body = Object.fromEntries(new FormData(registrationForm));
+        body.latitude = Number(body.latitude);
+        body.longitude = Number(body.longitude);
+        body.accuracyMeters = body.accuracyMeters === '' ? null : Number(body.accuracyMeters);
+        body.address = body.address.trim() || null;
+        saveRegistrationButton.disabled = true;
+        registrationStatus.textContent = 'Saving the confirmed station location…';
+        try {
+          const response = await fetch('/api/station-registration', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body)
+          });
+          const result = await response.json();
+          if (!response.ok) throw new Error(result.error || 'Station registration failed.');
+          station = result.station;
+          localObservation = undefined;
+          if (registrationPreviewMarker) {
+            registrationPreviewMarker.remove();
+            registrationPreviewMarker = undefined;
+          }
+          document.querySelector('#latest-reading').hidden = true;
+          comparisonData = { model: null, stations: [] };
+          displayStation();
+          map.setView([station.latitude, station.longitude], 13);
+          try { await loadLatestStoredObservation(); } catch {}
+          drawMarkers();
+          await loadComparisons();
+          registrationStatus.textContent = `Station location saved at ${formatTime(station.registeredAt)}. Future ESP32 and manual readings will use it.`;
+        } catch (error) {
+          registrationStatus.textContent = error.message;
+          saveRegistrationButton.disabled = false;
         }
       });
 
