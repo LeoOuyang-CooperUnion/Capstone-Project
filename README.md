@@ -9,10 +9,8 @@ The ESP32 prints temperature, relative humidity, and surface pressure to its
 Serial Monitor. The presenter copies those values into the local web app at
 `http://localhost:3000`; ESP32 Wi-Fi is not required.
 
-The backend timestamps and stores each observation in Supabase at the active
-station location. The fixed station configured in `.env` remains the fallback;
-a local user can explicitly register browser-provided coordinates for home or
-field testing. A Leaflet map compares it with:
+The backend timestamps and stores each manual observation in Supabase at the
+fixed station location configured in `.env`. A Leaflet map compares it with:
 
 - nearby physical National Weather Service observations; and
 - Open-Meteo modeled conditions at the demonstration location.
