@@ -39,6 +39,8 @@ order by ordinal_position;
 
 ## Demo behavior
 
+The currently supported path is BME280 -> ESP32-S3 -> Arduino Serial Monitor
+at 115200 baud -> manual browser entry -> backend storage and comparison.
 Copy temperature, humidity, and pressure from the Arduino Serial Monitor into
 the form. The backend adds its timestamp and the configured physical station
 location. Browser geolocation is not requested. The manual endpoint is
@@ -81,7 +83,8 @@ Manual observation body:
 
 The automatic ESP32 endpoint additionally requires the matching
 `X-Device-Secret` header. Automatic upload remains available for a later
-connected milestone but is disabled in the current firmware configuration.
+connected milestone, but that workflow is currently unavailable and is
+disabled in the firmware configuration. Do not depend on it for the demo.
 
 ## Hosting
 

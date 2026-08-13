@@ -9,6 +9,16 @@ The ESP32 prints temperature, relative humidity, and surface pressure to its
 Serial Monitor. The presenter copies those values into the local web app at
 `http://localhost:3000`; ESP32 Wi-Fi is not required.
 
+This is the supported demonstration workflow:
+
+```text
+BME280 -> ESP32-S3 -> Arduino Serial Monitor (115200 baud)
+        -> manual browser entry -> backend storage and comparison
+```
+
+Direct ESP32-to-backend Wi-Fi upload is retained in the code for future work,
+but it is currently unavailable and disabled by default.
+
 The backend timestamps and stores each manual observation in Supabase at the
 fixed station location configured in `.env`. A Leaflet map compares it with:
 
@@ -18,6 +28,11 @@ fixed station location configured in `.env`. A Leaflet map compares it with:
 These sources are labelled separately. Open-Meteo values are model output,
 not another physical sensor. Manual entries are also distinguished from future
 automatic device uploads.
+
+Manual entry and backend storage continue to work if Leaflet, map tiles, NWS,
+Open-Meteo, or another external service is unavailable. In that case the page
+keeps the form enabled and shows the local observation and any available
+comparison information as text.
 
 Setup is documented in [`backend/README.md`](backend/README.md). Firmware and
 wiring instructions are in [`esp32/README.md`](esp32/README.md).

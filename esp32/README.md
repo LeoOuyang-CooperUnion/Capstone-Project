@@ -37,6 +37,9 @@ documentation before connecting 5V.
 
 ### Optional later Wi-Fi upload
 
+This implementation is preserved for future work but is currently unavailable.
+Do not enable or depend on it for the working demonstration.
+
 1. Change `#define ENABLE_WIFI_UPLOAD 0` to `1` in the sketch.
 2. Copy `bme280_serial_monitor/secrets.h.example` to
    `bme280_serial_monitor/secrets.h`. This private file is already excluded

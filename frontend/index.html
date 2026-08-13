@@ -41,7 +41,8 @@
   <body>
     <header>
       <h1>Hyperlocal Weather Comparison</h1>
-      <p class="note">Compare a manually entered BME280 reading with nearby official observations and modeled conditions.</p>
+      <p><strong>Supported demo workflow:</strong> BME280 &rarr; ESP32-S3 &rarr; Arduino Serial Monitor at 115200 baud &rarr; manually enter all three values below &rarr; store and compare.</p>
+      <p class="note">Wi-Fi upload from the ESP32 is currently unavailable. Manual entry and storage do not depend on the map, map tiles, NWS, Open-Meteo, or other external services.</p>
     </header>
     <main class="grid">
       <section class="card">
@@ -131,6 +132,12 @@
         return Number.isNaN(parsed.valueOf()) ? value : parsed.toLocaleString();
       }
 
+      function escapeHtml(value) {
+        const element = document.createElement('span');
+        element.textContent = String(value ?? '');
+        return element.innerHTML;
+      }
+
       function markerRadius(value, metric) {
         if (!Number.isFinite(value)) return 8;
         if (metric === 'temperatureC') return Math.max(7, Math.min(18, 9 + value / 8));
@@ -144,14 +151,14 @@
         const marker = L.circleMarker([item.latitude, item.longitude], {
           radius: markerRadius(value, metric), color, fillColor: color, fillOpacity: .78, weight: 2
         });
-        marker.bindTooltip(`${item.name}: ${formatValue(value, metric)}`);
+        marker.bindTooltip(`${escapeHtml(item.name)}: ${escapeHtml(formatValue(value, metric))}`);
         marker.bindPopup(`
-          <strong>${item.name}</strong><br>
-          ${label}<br>
-          Temperature: ${formatValue(item.temperatureC, 'temperatureC')}<br>
-          Humidity: ${formatValue(item.humidityPercent, 'humidityPercent')}<br>
-          Pressure: ${formatValue(item.pressureHpa, 'pressureHpa')} (${item.pressureType || 'surface pressure'})<br>
-          Time: ${formatTime(item.observedAt)}
+          <strong>${escapeHtml(item.name)}</strong><br>
+          ${escapeHtml(label)}<br>
+          Temperature: ${escapeHtml(formatValue(item.temperatureC, 'temperatureC'))}<br>
+          Humidity: ${escapeHtml(formatValue(item.humidityPercent, 'humidityPercent'))}<br>
+          Pressure: ${escapeHtml(formatValue(item.pressureHpa, 'pressureHpa'))} (${escapeHtml(item.pressureType || 'surface pressure')})<br>
+          Time: ${escapeHtml(formatTime(item.observedAt))}
         `);
         marker.addTo(markerLayer);
         navigableMarkers.push({ marker, name: `${label}: ${item.name}` });
@@ -187,7 +194,7 @@
           addWeatherMarker({ ...localObservation, ...station, name: station.name, pressureType: 'surface_pressure' }, '#075985', metric, `Your BME280 (${station.environment})`);
         } else {
           const waitingMarker = L.circleMarker([station.latitude, station.longitude], { radius: 10, color: '#075985', fillColor: '#075985', fillOpacity: .35 })
-            .bindPopup(`<strong>${station.name}</strong><br>Waiting for a BME280 reading.<br>Environment: ${station.environment}`)
+            .bindPopup(`<strong>${escapeHtml(station.name)}</strong><br>Waiting for a BME280 reading.<br>Environment: ${escapeHtml(station.environment)}`)
             .addTo(markerLayer);
           navigableMarkers.push({ marker: waitingMarker, name: `Demo station: ${station.name}` });
         }
@@ -222,6 +229,7 @@
           if (!response.ok) throw new Error(result.error || 'Comparison request failed.');
           comparisonData = result;
           drawMarkers();
+          drawTextComparison();
           const sourceCount = (result.model ? 1 : 0) + result.stations.length;
           const warning = result.warnings.length ? ` ${result.warnings.join(' ')}` : '';
           comparisonStatus.textContent = `${sourceCount} outside comparison point${sourceCount === 1 ? '' : 's'} loaded.${warning}`;
@@ -237,6 +245,21 @@
           if (!response.ok) throw new Error();
           station = result.station;
           document.querySelector('#station-description').textContent = `${station.name} — ${station.address} — ${station.latitude.toFixed(4)}, ${station.longitude.toFixed(4)} — ${station.environment}`;
+          drawTextComparison();
+        } catch {
+          document.querySelector('#station-description').textContent = 'Could not load the configured demo station. Manual submission is still available; the backend will apply its configured location.';
+          comparisonStatus.textContent = 'Station and outside comparison details are unavailable. Manual entry remains available.';
+          return;
+        }
+
+        if (typeof L === 'undefined') {
+          document.querySelector('#map').textContent = 'Interactive map unavailable. Use the text comparison below.';
+          comparisonStatus.textContent = 'Leaflet could not load. Manual entry remains available.';
+          await loadComparisons();
+          return;
+        }
+
+        try {
           map = L.map('map').setView([station.latitude, station.longitude], 9);
           const mapResizeObserver = new ResizeObserver(() => map.invalidateSize({ pan: false }));
           mapResizeObserver.observe(document.querySelector('#map'));
@@ -258,9 +281,11 @@
           drawMarkers();
           await loadComparisons();
         } catch {
-          document.querySelector('#station-description').textContent = 'Could not load the configured demo station.';
-          comparisonStatus.textContent = 'Map configuration is unavailable.';
-          form.querySelector('button').disabled = true;
+          map = undefined;
+          markerLayer = undefined;
+          document.querySelector('#map').textContent = 'Interactive map unavailable. Use the text comparison below.';
+          comparisonStatus.textContent = 'The map could not initialize. Manual entry remains available.';
+          await loadComparisons();
         }
       }
 
@@ -277,6 +302,7 @@
           });
           const result = await response.json();
           if (!response.ok) { status.textContent = result.error; return; }
+          if (!station && result.station) station = result.station;
           localObservation = { ...result.measurement, observedAt: result.receivedAt };
           document.querySelector('#local-temperature').textContent = formatValue(localObservation.temperatureC, 'temperatureC');
           document.querySelector('#local-humidity').textContent = formatValue(localObservation.humidityPercent, 'humidityPercent');
@@ -284,6 +310,7 @@
           document.querySelector('#latest-reading').hidden = false;
           status.textContent = `Stored at ${formatTime(result.receivedAt)} as a manual Serial Monitor entry.`;
           drawMarkers();
+          drawTextComparison();
           await loadComparisons();
         } catch {
           status.textContent = 'Could not reach the local backend. Confirm npm start is running.';

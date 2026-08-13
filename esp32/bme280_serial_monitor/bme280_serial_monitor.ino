@@ -1,6 +1,8 @@
 #include <Wire.h>
 #include <Adafruit_BME280.h>
-#define ENABLE_WIFI_UPLOAD 1
+// The supported demonstration is Serial Monitor -> manual browser entry.
+// Direct Wi-Fi upload is retained for future work but is currently unavailable.
+#define ENABLE_WIFI_UPLOAD 0
 
 #if ENABLE_WIFI_UPLOAD
 #include <HTTPClient.h>
@@ -8,8 +10,6 @@
 #include "secrets.h"
 #endif
 
-// Keep this false while manually copying readings into the local demo page.
-// Change it to true only when testing ESP32 Wi-Fi uploads again.
 constexpr unsigned long READING_INTERVAL_MS = 60000;
 #if ENABLE_WIFI_UPLOAD
 constexpr unsigned long WIFI_RETRY_INTERVAL_MS = 30000;
