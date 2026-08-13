@@ -7,6 +7,7 @@ const app = express();
 const port = Number(process.env.PORT || process.env.API_PORT || 3000);
 const supabaseUrl = process.env.SUPABASE_URL;
 const supabaseSecretKey = process.env.SUPABASE_SECRET_KEY;
+const geoapifyApiKey = process.env.GEOAPIFY_API_KEY;
 const demoLatitude = Number(process.env.DEMO_LATITUDE);
 const demoLongitude = Number(process.env.DEMO_LONGITUDE);
 const demoLocationName = process.env.DEMO_LOCATION_NAME || 'Capstone demonstration station';
@@ -229,6 +230,35 @@ app.get('/api/geocode', async (request, response, next) => {
     const match = results[0];
     if (!match) return response.status(404).json({ error: 'No coordinates were found for that address.' });
     return response.json({ address: match.display_name, latitude: Number(match.lat), longitude: Number(match.lon) });
+  } catch (error) {
+    return next(error);
+  }
+});
+
+app.get('/api/address-suggestions', async (request, response, next) => {
+  if (!geoapifyApiKey) {
+    return response.status(503).json({ error: 'Address autocomplete is not configured.' });
+  }
+  const address = String(request.query.address || '').trim();
+  if (address.length < 3 || address.length > 200) {
+    return response.status(400).json({ error: 'Enter between 3 and 200 address characters.' });
+  }
+  try {
+    const parameters = new URLSearchParams({
+      text: address,
+      format: 'json',
+      limit: '5',
+      apiKey: geoapifyApiKey
+    });
+    const result = await fetchJson(`https://api.geoapify.com/v1/geocode/autocomplete?${parameters}`);
+    const suggestions = (result.results || [])
+      .map((match) => ({
+        address: match.formatted,
+        latitude: Number(match.lat),
+        longitude: Number(match.lon)
+      }))
+      .filter((match) => match.address && Number.isFinite(match.latitude) && Number.isFinite(match.longitude));
+    return response.json({ suggestions });
   } catch (error) {
     return next(error);
   }

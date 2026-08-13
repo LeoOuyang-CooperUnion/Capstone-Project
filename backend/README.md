@@ -10,6 +10,8 @@ calls external weather providers.
 2. Copy `.env.example` to `.env`.
 3. Set the Supabase and default demo-location variables. Keep `.env`
    private.
+   To enable address autocomplete, also set `GEOAPIFY_API_KEY` to a Geoapify
+   Address Autocomplete API key.
 4. Back up the `measurements` table, then run
    `backend/supabase-migration.sql` in the Supabase SQL editor. The script is
    idempotent and transactional; if a constraint finds invalid existing data,
@@ -66,6 +68,7 @@ shown as unavailable rather than invented.
 - `GET /api/demo-config`
 - `GET /api/comparisons/current`
 - `GET /api/geocode?address=...`
+- `GET /api/address-suggestions?address=...`
 - `GET /api/reverse-geocode?latitude=...&longitude=...`
 - `POST /api/demo-observations`
 - `GET /api/measurements/recent`

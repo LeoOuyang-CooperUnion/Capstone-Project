@@ -3,14 +3,55 @@
   <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>Hyperlocal Weather Comparison</title>
+    <title>GaiaEco | Hyperlocal Weather Comparison</title>
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
     <style>
       :root { color-scheme: light; font-family: system-ui, sans-serif; color: #17212b; background: #eef4f7; }
       body { margin: 0; overflow-x: hidden; }
       header, main { width: min(76rem, calc(100% - 2rem)); margin-inline: auto; }
-      header { padding: 1.5rem 0 .5rem; }
+      header { padding: 1.5rem 0 1rem; }
       h1, h2 { line-height: 1.15; }
+      .brand {
+        position: relative;
+        display: block;
+        width: 100%;
+        box-sizing: border-box;
+        padding: 1.15rem 1.5rem;
+        border: 1px solid #9db4aa;
+        border-radius: .8rem;
+        color: #f7fff9;
+        background: linear-gradient(120deg, #14532d, #0f766e);
+        box-shadow: 0 4px 14px #17324d24;
+        text-align: center;
+        cursor: help;
+      }
+      .brand h1 {
+        margin: 0;
+        font-family: Georgia, 'Times New Roman', serif;
+        font-size: clamp(2.6rem, 8vw, 5.5rem);
+        font-weight: 500;
+        letter-spacing: .12em;
+        line-height: 1;
+        text-shadow: 0 2px 4px #062f2280;
+      }
+      .brand-quote {
+        max-height: 0;
+        margin: 0;
+        overflow: hidden;
+        opacity: 0;
+        font-family: Georgia, 'Times New Roman', serif;
+        font-size: 1rem;
+        font-style: italic;
+        transition: max-height .3s ease, margin-top .3s ease, opacity .3s ease;
+      }
+      .brand:hover .brand-quote,
+      .brand:focus-visible .brand-quote {
+        max-height: 4rem;
+        margin-top: .85rem;
+        opacity: 1;
+      }
+      .brand:focus-visible { outline: 3px solid #f59e0b; outline-offset: 3px; }
+      .site-description { margin: .85rem .25rem 0; }
       .grid { display: grid; grid-template-columns: minmax(18rem, 25rem) minmax(0, 1fr); gap: 1rem; align-items: start; }
       .card { min-width: 0; overflow: hidden; background: white; border: 1px solid #c9d5dc; border-radius: .7rem; padding: 1rem; box-shadow: 0 2px 8px #17324d12; }
       fieldset { border: 1px solid #718096; border-radius: .5rem; padding: .8rem 1rem 1rem; }
@@ -42,8 +83,11 @@
   </head>
   <body>
     <header>
-      <h1>Hyperlocal Weather Comparison</h1>
-      <p>Enter a weather reading manually, choose its location, then store and compare it with nearby weather data.</p>
+      <div class="brand" tabindex="0" aria-describedby="gaia-quote">
+        <h1>Gaia ECO</h1>
+        <p id="gaia-quote" class="brand-quote">“Some people say that the earth is a living being named Gaia...”</p>
+      </div>
+      <p class="site-description"><strong>Hyperlocal Weather Comparison</strong> — Enter a weather reading manually, choose its location, then store and compare it with nearby weather data.</p>
     </header>
     <main class="grid">
       <section class="card">
@@ -53,9 +97,12 @@
         <form id="observation-form">
           <fieldset>
             <legend>Reading location</legend>
-            <button id="use-current-location" type="button">Use my current location</button>
+            <button id="use-current-location" type="button">Autofill address from my current location</button>
+            <p class="note">Allow location access to fill the nearest known address and its coordinates automatically.</p>
             <label for="address">Or enter an address</label>
-            <input id="address" name="address" type="text" maxlength="200" autocomplete="street-address" placeholder="Street, city, state, or postal code">
+            <input id="address" name="address" type="text" maxlength="200" autocomplete="off" list="address-suggestions" aria-describedby="address-help" placeholder="Start typing a street, landmark, city, or postal code">
+            <datalist id="address-suggestions"></datalist>
+            <p id="address-help" class="note">Type at least three characters and choose a suggestion to fill the address and coordinates.</p>
             <button id="find-address" type="button">Convert address to coordinates</button>
             <div class="coordinate-row">
               <label for="latitude">Latitude<input id="latitude" name="latitude" type="number" step="any" min="-90" max="90" required></label>
@@ -125,6 +172,7 @@
       const currentLocationButton = document.querySelector('#use-current-location');
       const findAddressButton = document.querySelector('#find-address');
       const addressInput = document.querySelector('#address');
+      const addressSuggestions = document.querySelector('#address-suggestions');
       const latitudeInput = document.querySelector('#latitude');
       const longitudeInput = document.querySelector('#longitude');
       const locationStatus = document.querySelector('#location-status');
@@ -134,6 +182,9 @@
       let map;
       let markerLayer;
       let navigableMarkers = [];
+      let addressSuggestionTimer;
+      let addressSuggestionRequest;
+      let suggestedLocations = new Map();
 
       const metricMetadata = {
         temperatureC: { label: 'Temperature', unit: '°C' },
@@ -214,6 +265,42 @@
         } finally {
           findAddressButton.disabled = false;
         }
+      }
+
+      async function loadAddressSuggestions() {
+        const address = addressInput.value.trim();
+        addressSuggestionRequest?.abort();
+        if (address.length < 3) {
+          addressSuggestions.replaceChildren();
+          suggestedLocations.clear();
+          return;
+        }
+
+        addressSuggestionRequest = new AbortController();
+        try {
+          const query = new URLSearchParams({ address });
+          const response = await fetch(`/api/address-suggestions?${query}`, {
+            signal: addressSuggestionRequest.signal
+          });
+          const result = await response.json();
+          if (!response.ok) {
+            if (response.status !== 503) locationStatus.textContent = result.error || 'Address suggestions are unavailable.';
+            return;
+          }
+          suggestedLocations = new Map(result.suggestions.map((item) => [item.address, item]));
+          addressSuggestions.replaceChildren(...result.suggestions.map((item) => {
+            const option = document.createElement('option');
+            option.value = item.address;
+            return option;
+          }));
+        } catch (error) {
+          if (error.name !== 'AbortError') addressSuggestions.replaceChildren();
+        }
+      }
+
+      function applySelectedAddressSuggestion() {
+        const selected = suggestedLocations.get(addressInput.value);
+        if (selected) applyLocation(selected);
       }
 
       function escapeHtml(value) {
@@ -426,6 +513,11 @@
           findAddress();
         }
       });
+      addressInput.addEventListener('input', () => {
+        clearTimeout(addressSuggestionTimer);
+        addressSuggestionTimer = setTimeout(loadAddressSuggestions, 600);
+      });
+      addressInput.addEventListener('change', applySelectedAddressSuggestion);
       initialize();
     </script>
   </body>
