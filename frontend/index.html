@@ -28,6 +28,8 @@
       .metric-row { display: grid; grid-template-columns: repeat(3, 1fr); gap: .5rem; }
       .metric { background: #f5f8fa; padding: .65rem; border-radius: .4rem; }
       .metric strong { display: block; font-size: 1.15rem; }
+      .comparison-list { padding-left: 1.25rem; }
+      .comparison-list li { margin-block: .45rem; }
       .leaflet-popup-content { line-height: 1.45; }
       [hidden] { display: none !important; }
       @media (max-width: 800px) { .grid { grid-template-columns: 1fr; } #map { height: 27rem; } }
@@ -65,7 +67,7 @@
 
       <section class="card">
         <h2>Area comparison</h2>
-        <label for="metric">Color markers by</label>
+        <label for="metric">Size markers by</label>
         <select id="metric">
           <option value="temperatureC">Temperature</option>
           <option value="humidityPercent">Relative humidity</option>
@@ -78,7 +80,9 @@
         </div>
         <div id="map" role="region" aria-label="Interactive weather comparison map"></div>
         <p id="comparison-status" aria-live="polite">Loading comparison data…</p>
-        <p class="note">Open-Meteo values are model output, not another physical sensor. NWS readings may be delayed. Indoor sensor values are not directly equivalent to outdoor observations.</p>
+        <h3>Text comparison</h3>
+        <ul id="comparison-list" class="comparison-list"><li>Comparison data is loading.</li></ul>
+        <p class="note">Open-Meteo values are model output, not another physical sensor. NWS markers are physical station observations and may be delayed. Pressure values are station/surface pressure without sea-level adjustment; differences can reflect elevation. Indoor sensor values do not represent outdoor neighborhood conditions.</p>
       </section>
     </main>
 
@@ -88,6 +92,7 @@
       const status = document.querySelector('#status');
       const comparisonStatus = document.querySelector('#comparison-status');
       const metricSelect = document.querySelector('#metric');
+      const comparisonList = document.querySelector('#comparison-list');
       let station;
       let localObservation;
       let comparisonData = { model: null, stations: [] };
@@ -135,10 +140,30 @@
         marker.addTo(markerLayer);
       }
 
+      function describeItem(item, label) {
+        const pressureType = (item.pressureType || 'surface_pressure').replace('_', ' ');
+        return `${label}, ${item.name}. Temperature ${formatValue(item.temperatureC, 'temperatureC')}; humidity ${formatValue(item.humidityPercent, 'humidityPercent')}; pressure ${formatValue(item.pressureHpa, 'pressureHpa')} (${pressureType}); timestamp ${formatTime(item.observedAt)}.`;
+      }
+
+      function drawTextComparison() {
+        const items = [];
+        if (localObservation) items.push(describeItem({ ...localObservation, name: station.name, pressureType: 'surface_pressure' }, `Manual BME280 ${station.environment} observation`));
+        else items.push(`Manual BME280 ${station.environment} observation at ${station.name}: waiting for an entry.`);
+        for (const nearby of comparisonData.stations || []) items.push(describeItem(nearby, 'NWS physical station observation'));
+        if (comparisonData.model) items.push(describeItem(comparisonData.model, 'Open-Meteo model output'));
+        comparisonList.replaceChildren(...items.map((description) => {
+          const item = document.createElement('li');
+          item.textContent = description;
+          return item;
+        }));
+      }
+
       function drawMarkers() {
         if (!map || !station) return;
         markerLayer.clearLayers();
         const metric = metricSelect.value;
+        if (comparisonData.model) addWeatherMarker(comparisonData.model, '#7e22ce', metric, 'Open-Meteo model output');
+        for (const nearby of comparisonData.stations || []) addWeatherMarker(nearby, '#15803d', metric, 'NWS physical station observation');
         if (localObservation) {
           addWeatherMarker({ ...localObservation, ...station, name: station.name, pressureType: 'surface_pressure' }, '#075985', metric, `Your BME280 (${station.environment})`);
         } else {
@@ -146,8 +171,7 @@
             .bindPopup(`<strong>${station.name}</strong><br>Waiting for a BME280 reading.<br>Environment: ${station.environment}`)
             .addTo(markerLayer);
         }
-        for (const nearby of comparisonData.stations || []) addWeatherMarker(nearby, '#15803d', metric, 'NWS physical station');
-        if (comparisonData.model) addWeatherMarker(comparisonData.model, '#7e22ce', metric, 'Open-Meteo model output');
+        drawTextComparison();
       }
 
       async function loadComparisons() {
@@ -172,7 +196,7 @@
           const result = await response.json();
           if (!response.ok) throw new Error();
           station = result.station;
-          document.querySelector('#station-description').textContent = `${station.name} — ${station.latitude.toFixed(4)}, ${station.longitude.toFixed(4)} — ${station.environment}`;
+          document.querySelector('#station-description').textContent = `${station.name} — ${station.address} — ${station.latitude.toFixed(4)}, ${station.longitude.toFixed(4)} — ${station.environment}`;
           map = L.map('map').setView([station.latitude, station.longitude], 9);
           L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
             maxZoom: 19,

@@ -22,6 +22,10 @@ automatic device uploads.
 Setup is documented in [`backend/README.md`](backend/README.md). Firmware and
 wiring instructions are in [`esp32/README.md`](esp32/README.md).
 
+The example configuration registers The Cooper Union, 7 East 7th Street, as
+the default demonstration address. A presenter can configure another address
+and matching coordinates on the computer without enabling browser geolocation.
+
 ## Decisions confirmed for the first deployment
 
 - Start with one device and no user accounts.

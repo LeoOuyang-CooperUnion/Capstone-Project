@@ -10,18 +10,31 @@ calls external weather providers.
 2. Copy `.env.example` to `.env`.
 3. Set the device, Supabase, and fixed demo-location variables. Keep `.env`
    private.
-4. Run `backend/supabase-migration.sql` once in the Supabase SQL editor.
+4. Back up the `measurements` table, then run
+   `backend/supabase-migration.sql` in the Supabase SQL editor. The script is
+   idempotent and transactional; if a constraint finds invalid existing data,
+   the whole migration rolls back.
 5. Run `npm start`.
 6. Visit `http://localhost:3000/health`, then `http://localhost:3000`.
 
 Required demo-location variables:
 
 ```dotenv
-DEMO_LOCATION_NAME=Capstone demonstration station
-DEMO_LATITUDE=40.7128
-DEMO_LONGITUDE=-74.0060
+DEMO_LOCATION_NAME=The Cooper Union
+DEMO_ADDRESS=7 East 7th Street, New York, NY 10003
+DEMO_LATITUDE=40.7290
+DEMO_LONGITUDE=-73.9902
 DEMO_ENVIRONMENT=indoor
 NWS_STATION_LIMIT=5
+```
+
+To verify the migration in the SQL editor without exposing row data, run:
+
+```sql
+select column_name, data_type
+from information_schema.columns
+where table_schema = 'public' and table_name = 'measurements'
+order by ordinal_position;
 ```
 
 ## Demo behavior
@@ -30,6 +43,11 @@ Copy temperature, humidity, and pressure from the Arduino Serial Monitor into
 the form. The backend adds its timestamp and the configured physical station
 location. Browser geolocation is not requested. The manual endpoint is
 restricted to requests from the computer running the backend.
+
+The address is registered by the computer from `DEMO_ADDRESS`; no browser
+location permission is needed. The example configuration defaults to Cooper
+Union. To demonstrate another address, geocode it before the demo and update
+the address, latitude, and longitude together in the private `.env` file.
 
 The Leaflet map shows three explicitly labelled sources:
 

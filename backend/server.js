@@ -13,10 +13,11 @@ const supabaseSecretKey = process.env.SUPABASE_SECRET_KEY;
 const demoLatitude = Number(process.env.DEMO_LATITUDE);
 const demoLongitude = Number(process.env.DEMO_LONGITUDE);
 const demoLocationName = process.env.DEMO_LOCATION_NAME || 'Capstone demonstration station';
+const demoAddress = process.env.DEMO_ADDRESS;
 const demoEnvironment = process.env.DEMO_ENVIRONMENT || 'indoor';
 const nwsStationLimit = Math.min(Math.max(Number(process.env.NWS_STATION_LIMIT) || 5, 1), 10);
 
-if (!deviceId || !deviceSecret || deviceSecret.startsWith('replace-this') || !supabaseUrl || !supabaseSecretKey || supabaseSecretKey.startsWith('replace-with') || !Number.isFinite(demoLatitude) || !Number.isFinite(demoLongitude)) {
+if (!deviceId || !deviceSecret || deviceSecret.startsWith('replace-this') || !supabaseUrl || !supabaseSecretKey || supabaseSecretKey.startsWith('replace-with') || !demoAddress || !Number.isFinite(demoLatitude) || !Number.isFinite(demoLongitude)) {
   console.error('Set device, Supabase, and demo-location variables in .env before starting the server.');
   process.exit(1);
 }
@@ -78,9 +79,10 @@ async function storeObservation({ temperatureC, humidityPercent, pressureHpa, so
       latitude: demoLatitude,
       longitude: demoLongitude,
       location_name: demoLocationName,
+      location_address: demoAddress,
       environment: demoEnvironment
     })
-    .select('id, received_at, temperature_c, humidity_percent, pressure_hpa, source, latitude, longitude, location_name, environment')
+    .select('id, received_at, temperature_c, humidity_percent, pressure_hpa, source, latitude, longitude, location_name, location_address, environment')
     .single();
 
   if (error) {
@@ -98,6 +100,7 @@ app.get('/api/demo-config', (_request, response) => {
   response.json({
     station: {
       name: demoLocationName,
+      address: demoAddress,
       latitude: demoLatitude,
       longitude: demoLongitude,
       environment: demoEnvironment,
@@ -253,6 +256,7 @@ app.post('/api/demo-observations', async (request, response, next) => {
       source: observation.source,
       station: {
         name: observation.location_name,
+        address: observation.location_address,
         latitude: observation.latitude,
         longitude: observation.longitude,
         environment: observation.environment
@@ -272,7 +276,7 @@ app.get('/api/measurements/recent', async (_request, response, next) => {
   try {
     const { data, error } = await supabase
       .from('measurements')
-      .select('id, received_at, temperature_c, humidity_percent, pressure_hpa, source, latitude, longitude, location_name, environment')
+      .select('id, received_at, temperature_c, humidity_percent, pressure_hpa, source, latitude, longitude, location_name, location_address, environment')
       .order('received_at', { ascending: false })
       .limit(50);
 

@@ -1,16 +1,15 @@
 # ESP32-S3 firmware
 
-## Milestone 2: sensor upload test
+## Milestone 2: manual Serial Monitor demo
 
 `bme280_serial_monitor/bme280_serial_monitor.ino` verifies this data path:
 
 ```text
-BME280 -> ESP32-S3 -> Wi-Fi -> JavaScript backend
+BME280 -> ESP32-S3 Serial Monitor -> manual browser entry
 ```
 
-It still prints every observation to Serial Monitor at 115200 baud. Follow
-[`../backend/README.md`](../backend/README.md) to configure the Wi-Fi and
-device-secret file before uploading this version.
+The default sketch does not compile Wi-Fi support and does not require
+`secrets.h`. It prints every observation to Serial Monitor at 115200 baud.
 
 ### Wiring
 
@@ -36,23 +35,24 @@ documentation before connecting 5V.
 4. Open `bme280_serial_monitor.ino`, upload it, and open Serial Monitor at
    **115200 baud**.
 
-### Configure and test the upload
+### Optional later Wi-Fi upload
 
-1. Copy `bme280_serial_monitor/secrets.h.example` to
+1. Change `#define ENABLE_WIFI_UPLOAD 0` to `1` in the sketch.
+2. Copy `bme280_serial_monitor/secrets.h.example` to
    `bme280_serial_monitor/secrets.h`. This private file is already excluded
    from Git.
-2. Enter the Wi-Fi network name and password. Set `DEVICE_ID` and
+3. Enter the Wi-Fi network name and password. Set `DEVICE_ID` and
    `DEVICE_SECRET` to the exact values in the project's root `.env` file.
-3. Set `BACKEND_URL` to the local IPv4 address of the computer running the
+4. Set `BACKEND_URL` to the local IPv4 address of the computer running the
    backend, including port `3000`. Do not use `localhost` or `127.0.0.1`:
    those addresses would refer to the ESP32 itself.
-4. On the computer, start the backend from the project root with `npm start`.
+5. On the computer, start the backend from the project root with `npm start`.
    Confirm `http://localhost:3000/health` returns `{"status":"ok"}`.
-5. Ensure the ESP32 and computer are on the same Wi-Fi network, select the
+6. Ensure the ESP32 and computer are on the same Wi-Fi network, select the
    correct ESP32-S3 board and serial port in Arduino IDE, then upload the
    sketch. If Windows asks, allow Node.js through the firewall on **private**
    networks.
-6. Open Serial Monitor at **115200 baud**. After a Wi-Fi connection succeeds,
+7. Open Serial Monitor at **115200 baud**. After a Wi-Fi connection succeeds,
    the sketch sends one reading immediately and then one each minute.
 
 Successful output includes `Wi-Fi connected`, the three sensor values, and

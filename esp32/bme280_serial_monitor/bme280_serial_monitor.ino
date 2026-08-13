@@ -1,19 +1,25 @@
 #include <Wire.h>
 #include <Adafruit_BME280.h>
+#define ENABLE_WIFI_UPLOAD 0
+
+#if ENABLE_WIFI_UPLOAD
 #include <HTTPClient.h>
 #include <WiFi.h>
 #include "secrets.h"
+#endif
 
 // Keep this false while manually copying readings into the local demo page.
 // Change it to true only when testing ESP32 Wi-Fi uploads again.
-constexpr bool ENABLE_WIFI_UPLOAD = false;
 constexpr unsigned long READING_INTERVAL_MS = 60000;
+#if ENABLE_WIFI_UPLOAD
 constexpr unsigned long WIFI_RETRY_INTERVAL_MS = 30000;
+#endif
 constexpr uint8_t BME280_I2C_ADDRESS = 0x76;
 
 Adafruit_BME280 bme;
 bool sensorAvailable = false;
 unsigned long lastReadingAt = 0;
+#if ENABLE_WIFI_UPLOAD
 unsigned long lastWifiAttemptAt = 0;
 
 void reportWifiEvent(WiFiEvent_t event, WiFiEventInfo_t eventInfo) {
@@ -46,6 +52,7 @@ void printWifiScanResults() {
     Serial.println("Configured Wi-Fi network was not found. Check its name, range, and 2.4 GHz setting.");
   }
 }
+#endif
 
 bool connectBme280() {
   if (bme.begin(BME280_I2C_ADDRESS, &Wire)) {
@@ -73,10 +80,10 @@ bool readAndSendObservation() {
   Serial.printf("Pressure:    %.1f hPa\n", pressureHpa);
   Serial.println("This is an observation, not a weather forecast.");
 
-  if (!ENABLE_WIFI_UPLOAD) {
+#if !ENABLE_WIFI_UPLOAD
     Serial.println("Manual demo mode: copy these values into the local web app.");
     return true;
-  }
+#else
 
   if (WiFi.status() != WL_CONNECTED) {
     Serial.println("Wi-Fi unavailable. Observation was not uploaded.");
@@ -104,8 +111,10 @@ bool readAndSendObservation() {
   Serial.printf("Upload failed (HTTP %d): %s\n", responseCode, http.getString().c_str());
   http.end();
   return false;
+#endif
 }
 
+#if ENABLE_WIFI_UPLOAD
 void connectToWifiIfNeeded() {
   if (WiFi.status() == WL_CONNECTED || millis() - lastWifiAttemptAt < WIFI_RETRY_INTERVAL_MS) {
     return;
@@ -132,6 +141,7 @@ void connectToWifiIfNeeded() {
     Serial.println("\nWi-Fi connection failed. Retrying in 30 seconds.");
   }
 }
+#endif
 
 void setup() {
   Serial.begin(115200);
@@ -150,14 +160,14 @@ void setup() {
     return;
   }
 
-  if (ENABLE_WIFI_UPLOAD) {
+#if ENABLE_WIFI_UPLOAD
     WiFi.onEvent(reportWifiEvent);
     WiFi.mode(WIFI_STA);
     printWifiScanResults();
     connectToWifiIfNeeded();
-  } else {
+#else
     Serial.println("Manual demo mode enabled. Wi-Fi uploads are disabled.");
-  }
+#endif
   readAndSendObservation();
   lastReadingAt = millis();
 }
@@ -168,9 +178,9 @@ void loop() {
     return;
   }
 
-  if (ENABLE_WIFI_UPLOAD) {
+#if ENABLE_WIFI_UPLOAD
     connectToWifiIfNeeded();
-  }
+#endif
 
   if (millis() - lastReadingAt >= READING_INTERVAL_MS) {
     readAndSendObservation();
