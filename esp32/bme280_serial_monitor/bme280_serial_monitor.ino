@@ -1,6 +1,6 @@
 #include <Wire.h>
 #include <Adafruit_BME280.h>
-#define ENABLE_WIFI_UPLOAD 0
+#define ENABLE_WIFI_UPLOAD 1
 
 #if ENABLE_WIFI_UPLOAD
 #include <HTTPClient.h>

@@ -4,15 +4,15 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>Hyperlocal Weather Comparison</title>
-    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" integrity="sha256-p4NxAoJBhIINfQ3ynhFwZxGRbVboX7pKf9iL9FtVQYc=" crossorigin="">
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
     <style>
       :root { color-scheme: light; font-family: system-ui, sans-serif; color: #17212b; background: #eef4f7; }
-      body { margin: 0; }
+      body { margin: 0; overflow-x: hidden; }
       header, main { width: min(76rem, calc(100% - 2rem)); margin-inline: auto; }
       header { padding: 1.5rem 0 .5rem; }
       h1, h2 { line-height: 1.15; }
-      .grid { display: grid; grid-template-columns: minmax(18rem, 25rem) 1fr; gap: 1rem; align-items: start; }
-      .card { background: white; border: 1px solid #c9d5dc; border-radius: .7rem; padding: 1rem; box-shadow: 0 2px 8px #17324d12; }
+      .grid { display: grid; grid-template-columns: minmax(18rem, 25rem) minmax(0, 1fr); gap: 1rem; align-items: start; }
+      .card { min-width: 0; overflow: hidden; background: white; border: 1px solid #c9d5dc; border-radius: .7rem; padding: 1rem; box-shadow: 0 2px 8px #17324d12; }
       fieldset { border: 1px solid #718096; border-radius: .5rem; padding: .8rem 1rem 1rem; }
       label { display: block; font-weight: 650; margin-top: .65rem; }
       input, button, select { box-sizing: border-box; width: 100%; font: inherit; padding: .55rem; }
@@ -20,7 +20,10 @@
       button { cursor: pointer; margin-top: 1rem; border: 0; border-radius: .3rem; background: #075985; color: white; font-weight: 700; }
       button:disabled { cursor: wait; opacity: .65; }
       input:focus-visible, button:focus-visible, select:focus-visible { outline: 3px solid #f59e0b; outline-offset: 2px; }
-      #map { height: 34rem; border-radius: .5rem; background: #d9e3e8; }
+      #map { width: 100%; max-width: 100%; height: 34rem; overflow: hidden; border: 1px solid #9aaab4; border-radius: .5rem; background: #d9e3e8; }
+      .map-tools { display: flex; flex-wrap: wrap; gap: .5rem; margin: .75rem 0; align-items: end; }
+      .map-tools label { flex: 1 1 16rem; margin: 0; }
+      .map-tools button { width: auto; flex: 0 1 auto; margin: 0; }
       #status, #comparison-status { font-weight: 650; }
       .note { color: #374151; }
       .legend { display: flex; flex-wrap: wrap; gap: .6rem 1rem; margin: .7rem 0; }
@@ -78,6 +81,15 @@
           <span class="key" style="--color:#15803d">NWS physical station</span>
           <span class="key" style="--color:#7e22ce">Open-Meteo model</span>
         </div>
+        <div class="map-tools" aria-label="Map navigation controls">
+          <label for="comparison-point">Go to a comparison point
+            <select id="comparison-point">
+              <option value="">Choose a point</option>
+            </select>
+          </label>
+          <button id="show-all-points" type="button">Show all points</button>
+          <button id="focus-demo-station" type="button">Refocus demo station</button>
+        </div>
         <div id="map" role="region" aria-label="Interactive weather comparison map"></div>
         <p id="comparison-status" aria-live="polite">Loading comparison data…</p>
         <h3>Text comparison</h3>
@@ -93,11 +105,15 @@
       const comparisonStatus = document.querySelector('#comparison-status');
       const metricSelect = document.querySelector('#metric');
       const comparisonList = document.querySelector('#comparison-list');
+      const comparisonPointSelect = document.querySelector('#comparison-point');
+      const showAllPointsButton = document.querySelector('#show-all-points');
+      const focusDemoStationButton = document.querySelector('#focus-demo-station');
       let station;
       let localObservation;
       let comparisonData = { model: null, stations: [] };
       let map;
       let markerLayer;
+      let navigableMarkers = [];
 
       const metricMetadata = {
         temperatureC: { label: 'Temperature', unit: '°C' },
@@ -138,6 +154,8 @@
           Time: ${formatTime(item.observedAt)}
         `);
         marker.addTo(markerLayer);
+        navigableMarkers.push({ marker, name: `${label}: ${item.name}` });
+        return marker;
       }
 
       function describeItem(item, label) {
@@ -161,17 +179,39 @@
       function drawMarkers() {
         if (!map || !station) return;
         markerLayer.clearLayers();
+        navigableMarkers = [];
         const metric = metricSelect.value;
         if (comparisonData.model) addWeatherMarker(comparisonData.model, '#7e22ce', metric, 'Open-Meteo model output');
         for (const nearby of comparisonData.stations || []) addWeatherMarker(nearby, '#15803d', metric, 'NWS physical station observation');
         if (localObservation) {
           addWeatherMarker({ ...localObservation, ...station, name: station.name, pressureType: 'surface_pressure' }, '#075985', metric, `Your BME280 (${station.environment})`);
         } else {
-          L.circleMarker([station.latitude, station.longitude], { radius: 10, color: '#075985', fillColor: '#075985', fillOpacity: .35 })
+          const waitingMarker = L.circleMarker([station.latitude, station.longitude], { radius: 10, color: '#075985', fillColor: '#075985', fillOpacity: .35 })
             .bindPopup(`<strong>${station.name}</strong><br>Waiting for a BME280 reading.<br>Environment: ${station.environment}`)
             .addTo(markerLayer);
+          navigableMarkers.push({ marker: waitingMarker, name: `Demo station: ${station.name}` });
         }
+        const previousSelection = comparisonPointSelect.value;
+        comparisonPointSelect.replaceChildren(new Option('Choose a point', ''));
+        navigableMarkers.forEach((item, index) => comparisonPointSelect.add(new Option(item.name, String(index))));
+        if (navigableMarkers[Number(previousSelection)]) comparisonPointSelect.value = previousSelection;
         drawTextComparison();
+      }
+
+      function showAllPoints() {
+        if (!map || markerLayer.getLayers().length === 0) return;
+        const bounds = L.featureGroup(markerLayer.getLayers()).getBounds();
+        if (bounds.isValid()) map.fitBounds(bounds, { padding: [35, 35], maxZoom: 13 });
+      }
+
+      function focusDemoStation() {
+        if (!map || !station) return;
+        map.flyTo([station.latitude, station.longitude], 13);
+        const localMarker = [...navigableMarkers].reverse().find(({ marker }) => {
+          const point = marker.getLatLng();
+          return point.lat === station.latitude && point.lng === station.longitude;
+        });
+        if (localMarker) localMarker.marker.openPopup();
       }
 
       async function loadComparisons() {
@@ -198,10 +238,22 @@
           station = result.station;
           document.querySelector('#station-description').textContent = `${station.name} — ${station.address} — ${station.latitude.toFixed(4)}, ${station.longitude.toFixed(4)} — ${station.environment}`;
           map = L.map('map').setView([station.latitude, station.longitude], 9);
-          L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
+          const mapResizeObserver = new ResizeObserver(() => map.invalidateSize({ pan: false }));
+          mapResizeObserver.observe(document.querySelector('#map'));
+          const baseLayer = L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png', {
+            subdomains: 'abcd',
             maxZoom: 19,
-            attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
-          }).addTo(map);
+            crossOrigin: true,
+            keepBuffer: 4,
+            updateWhenIdle: false,
+            attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; <a href="https://carto.com/attributions">CARTO</a>'
+          });
+          baseLayer.on('tileerror', ({ tile, coords }) => {
+            if (tile.dataset.fallbackApplied === 'true') return;
+            tile.dataset.fallbackApplied = 'true';
+            tile.src = `https://tile.openstreetmap.org/${coords.z}/${coords.x}/${coords.y}.png`;
+          });
+          baseLayer.addTo(map);
           markerLayer = L.layerGroup().addTo(map);
           drawMarkers();
           await loadComparisons();
@@ -241,6 +293,14 @@
       });
 
       metricSelect.addEventListener('change', drawMarkers);
+      comparisonPointSelect.addEventListener('change', () => {
+        const selected = navigableMarkers[Number(comparisonPointSelect.value)];
+        if (!comparisonPointSelect.value || !selected) return;
+        map.flyTo(selected.marker.getLatLng(), 13);
+        selected.marker.openPopup();
+      });
+      showAllPointsButton.addEventListener('click', showAllPoints);
+      focusDemoStationButton.addEventListener('click', focusDemoStation);
       initialize();
     </script>
   </body>
